@@ -14,15 +14,6 @@ import (
 	kronktools "github.com/agentdisc/goagentdisc/internal/tools"
 )
 
-// DefaultModel is the built-in model source pre-filled in the new-debate
-// form (see docs/SPEC.md D7). Qwen3-8B is a meaningful step up in
-// instruction-following over the smaller 0.6B/1.7B tiers — small local
-// models are prone to ignoring structural constraints in the system prompt
-// (e.g. writing "Round 2:" headers, or drafting several turns at once) —
-// while still comfortably fitting in memory on a typical modern machine
-// (~8.7GB at Q8_0). The form's model field is always editable, so anyone
-// with more RAM to spare can type in a bigger one (e.g.
-// "unsloth/gpt-oss-20b-Q8_0" at ~12GB).
 const DefaultModel = "Qwen/Qwen3-8B-Q8_0"
 
 // Bootstrap installs (if needed) the native inference libraries and the

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/agentdisc/goagentdisc/internal/orchestrator"
 	"github.com/agentdisc/goagentdisc/internal/tui"
 )
 
@@ -15,7 +16,7 @@ import (
 const archiveDir = "debates"
 
 func main() {
-	if err := tui.Run(tui.Options{ArchiveDir: archiveDir}); err != nil {
+	if err := tui.Run(tui.Options{ArchiveDir: archiveDir}, orchestrator.NewKronkEngine()); err != nil {
 		fmt.Fprintln(os.Stderr, "goagentdisc:", err)
 		os.Exit(1)
 	}
