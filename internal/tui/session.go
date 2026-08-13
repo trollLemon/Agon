@@ -172,10 +172,10 @@ func (m *sessionModel) update(msg tea.KeyMsg, a *App) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 	case "j", "down":
-		m.viewport.LineDown(1)
+		m.viewport.ScrollDown(1)
 		return a, nil
 	case "k", "up":
-		m.viewport.LineUp(1)
+		m.viewport.ScrollUp(1)
 		return a, nil
 	}
 	var cmd tea.Cmd
