@@ -25,11 +25,10 @@ improvement in terms of design, maintainability, and code quality (you can see s
 ## Quick start
 
 ```bash
-go run ./cmd
+go run ./agon
 ```
 
-This opens the TUI at the main menu. There are no flags: everything (topic, starting
-context, mode, tone, rounds, model) is entered on the new-debate form.
+This opens the TUI at the main menu. 
 
 - **Start a new debate**: fill in the topic and (optionally) freeform starting context. You can specify
    paths to documents, code, etc, which will be added into the models read only sandbox.
