@@ -53,7 +53,7 @@ type App struct {
 	archiveList archiveListModel
 	session     sessionModel
 
-	live *liveDebate // at most one at a time (D9)
+	live *liveDebate
 }
 
 // pendingDebate holds a validated form submission while the model is still
@@ -67,9 +67,7 @@ type pendingDebate struct {
 }
 
 // New creates the root App model. engine is the (uninitialized) model
-// backend the app drives; it is injected so tests can supply a fake that
-// never loads a real model, while production passes an
-// orchestrator.KronkEngine.
+// backend the app drives.
 func New(opts Options, engine orchestrator.Engine) *App {
 	if opts.DefaultModel == "" {
 		opts.DefaultModel = orchestrator.DefaultModel

@@ -1,6 +1,3 @@
-// Package archive persists finished debates as one JSON file per session,
-// written exactly once when the verdict completes (see docs/SPEC.md D5). A
-// killed or crashed run leaves no file — there is no "incomplete" status.
 package archive
 
 import (
@@ -38,7 +35,7 @@ type Message struct {
 }
 
 // Session is the full on-disk shape of one debate: metadata, transcript, and
-// verdict (see docs/SPEC.md D5 for the schema).
+// verdict.
 type Session struct {
 	SessionID string            `json:"session_id"`
 	Title     string            `json:"title"`

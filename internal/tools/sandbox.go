@@ -1,8 +1,3 @@
-// Package tools implements the read-only, sandboxed tool set debaters use to
-// ground claims in real directories: read_file, grep, and list_dir. All
-// three are confined to a set of detected directories; nothing in this
-// package can write, delete, or read outside them. The directories are
-// plain paths — they may or may not be git repositories.
 package tools
 
 import (
