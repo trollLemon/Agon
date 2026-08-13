@@ -35,7 +35,7 @@ func TestDebaterSystemVersusUsesStance(t *testing.T) {
 
 func TestToneGuidancePerTone(t *testing.T) {
 	cases := map[Tone]string{
-		ToneFormal:   "Do not use ALL CAPS",
+		ToneFormal:   "ALL CAPS for emphasis",
 		ToneInformal: "chatroom register",
 		ToneGenZ:     "genz/genalpha slang",
 		ToneUnhinged: "manic, chaotic",

@@ -55,34 +55,6 @@ type Session struct {
 	Aborted   map[string]string `json:"aborted,omitempty"`
 }
 
-// Summary is a session's entry in a directory listing, cheap enough to
-// build for every archived file without holding the full transcript.
-type Summary struct {
-	SessionID  string    `json:"session_id"`
-	Title      string    `json:"title"`
-	Topic      string    `json:"topic"`
-	Mode       string    `json:"mode"`
-	Tone       string    `json:"tone"`
-	Rounds     int       `json:"rounds"`
-	CreatedAt  time.Time `json:"created_at"`
-	HasVerdict bool      `json:"has_verdict"`
-	Aborted    bool      `json:"aborted"`
-}
-
-func summarize(s Session) Summary {
-	return Summary{
-		SessionID:  s.SessionID,
-		Title:      s.Title,
-		Topic:      s.Topic,
-		Mode:       s.Mode,
-		Tone:       s.Tone,
-		Rounds:     s.Rounds,
-		CreatedAt:  s.CreatedAt,
-		HasVerdict: s.Verdict != "",
-		Aborted:    len(s.Aborted) > 0,
-	}
-}
-
 // path returns the archive file path for a session id within dir.
 func path(dir, sessionID string) string {
 	return filepath.Join(dir, sessionID+".json")
@@ -134,9 +106,9 @@ func Load(dir, sessionID string) (Session, error) {
 	return s, nil
 }
 
-// List returns a summary of every archived session in dir, newest first. A
-// missing dir is treated as empty, not an error.
-func List(dir string) ([]Summary, error) {
+// List returns every archived session in dir, newest first. A missing dir
+// is treated as empty, not an error.
+func List(dir string) ([]Session, error) {
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -145,7 +117,7 @@ func List(dir string) ([]Summary, error) {
 		return nil, fmt.Errorf("read archive dir: %w", err)
 	}
 
-	out := make([]Summary, 0, len(entries))
+	out := make([]Session, 0, len(entries))
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() || !strings.HasSuffix(name, ".json") {
@@ -156,7 +128,7 @@ func List(dir string) ([]Summary, error) {
 		if err != nil {
 			continue // skip unreadable/partial files rather than failing the whole listing
 		}
-		out = append(out, summarize(s))
+		out = append(out, s)
 	}
 
 	sort.Slice(out, func(i, j int) bool {

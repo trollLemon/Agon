@@ -33,4 +33,4 @@ type openArchivedMsg struct{ sessionID string }
 type liveUpdateMsg struct{ sessionID string }
 
 // archiveListLoadedMsg carries a freshly reloaded archive listing.
-type archiveListLoadedMsg struct{ items []archive.Summary }
+type archiveListLoadedMsg struct{ items []archive.Session }

@@ -13,7 +13,7 @@ import (
 // (docs/SPEC.md D8).
 type archiveListModel struct {
 	dir    string
-	items  []archive.Summary
+	items  []archive.Session
 	cursor int
 	err    error
 }
@@ -34,7 +34,7 @@ func (m archiveListModel) reload() tea.Cmd {
 	}
 }
 
-func (m *archiveListModel) setItems(items []archive.Summary) {
+func (m *archiveListModel) setItems(items []archive.Session) {
 	m.items = items
 	if m.cursor >= len(items) {
 		m.cursor = max(0, len(items)-1)
@@ -75,9 +75,9 @@ func (m archiveListModel) View() string {
 			cursor = "> "
 		}
 		status := " "
-		if s.Aborted {
+		if len(s.Aborted) > 0 {
 			status = "✗"
-		} else if s.HasVerdict {
+		} else if s.Verdict != "" {
 			status = "✓"
 		}
 		fmt.Fprintf(&b, "%s%s %-40s  %s  %s\n", cursor, status, truncate(s.Title, 40),
