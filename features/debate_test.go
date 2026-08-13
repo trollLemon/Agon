@@ -1,5 +1,5 @@
-// Package features drives the agon TUI through godog BDD scenarios
-// (docs/SPEC.md D12), using teatest so the app runs exactly as it would in a
+// Package features drives the agon TUI through godog BDD scenarios,
+// using teatest so the app runs exactly as it would in a
 // real terminal and a fake Engine so no real model is ever loaded.
 package features
 

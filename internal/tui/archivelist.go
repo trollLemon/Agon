@@ -9,8 +9,7 @@ import (
 	"github.com/trollLemon/agon/internal/archive"
 )
 
-// archiveListModel is a cursor-based browser over archived sessions
-// (docs/SPEC.md D8).
+// archiveListModel is a cursor-based browser over archived sessions.
 type archiveListModel struct {
 	dir    string
 	items  []archive.Session

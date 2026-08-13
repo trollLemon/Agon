@@ -54,8 +54,8 @@ func fromArchivedSession(sess archive.Session) sessionView {
 	}
 }
 
-// sessionModel renders the exclusive full-screen session view (docs/SPEC.md
-// D8): a header, a scrolling transcript, and an abort confirmation prompt.
+// sessionModel renders the exclusive full-screen session view: a header,
+// a scrolling transcript, and an abort confirmation prompt.
 type sessionModel struct {
 	width, height int
 	viewport      viewport.Model

@@ -8,7 +8,7 @@ import (
 )
 
 // menuModel is the app's landing screen: a simple cursor-based list of
-// actions (docs/SPEC.md D8).
+// actions.
 type menuModel struct {
 	cursor int
 }

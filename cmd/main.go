@@ -1,6 +1,3 @@
-// Command agon opens the debate TUI at the main menu. It takes no
-// flags: everything (topic, mode, tone, rounds, model) is entered through
-// the on-screen new-debate form (see docs/SPEC.md D7, D8).
 package main
 
 import (
@@ -12,7 +9,7 @@ import (
 )
 
 // archiveDir is where finished debates are written, one JSON file per
-// session (docs/SPEC.md D5).
+// session.
 const archiveDir = "debates"
 
 func main() {
