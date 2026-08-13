@@ -97,13 +97,3 @@ go test ./... -race -p 1      # race detector; -p 1 serializes package binaries
                                # timeouts in the teatest-driven tests)
 go test ./features/...        # just the BDD scenarios (godog + teatest)
 ```
-
-- `internal/orchestrator`, `internal/archive`, `internal/prompts`, `internal/tools` are
-  unit-tested against a fake `ChatClient`: no real model, no TTY.
-- `internal/tui` and `features/` drive the actual Bubble Tea app via
-  [`teatest`](https://github.com/charmbracelet/x/tree/main/exp/teatest) with a fake
-  `ChatClient`, so the whole app (menu → form → live debate → verdict → archive →
-  browse → abort) is exercised without ever loading a real model.
-- An integration test against a real, tiny kronk model (e.g. `unsloth/Qwen3-0.6B-Q8_0`)
-  is planned per `docs/SPEC.md` D12 but not required for everyday development; it would
-  be gated behind `-short` or an opt-in environment variable so it never runs by default.
