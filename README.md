@@ -24,6 +24,8 @@ improvement in terms of design, maintainability, and code quality (you can see s
 
 ## Quick start
 
+> ***NOTE***: This project is still in early stages of development.
+
 ```bash
 go run ./agon
 ```
