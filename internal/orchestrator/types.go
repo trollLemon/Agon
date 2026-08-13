@@ -1,8 +1,3 @@
-// Package orchestrator runs the debate loop: one advocate and one critic
-// each keep a persistent per-role message history against a single loaded
-// model, tool calls are executed against a sandboxed repo when one is in
-// scope, and a neutral judge reads the full transcript once at the end. See
-// docs/SPEC.md D2, D3, D6, D11.
 package orchestrator
 
 import (
@@ -15,9 +10,7 @@ import (
 )
 
 // Role identifies which pseudo-agent a chat turn belongs to: a debater's
-// side id, or RoleJudge. Kept as a distinct type (rather than a bare
-// string) so a ChatClient can key per-role behavior — e.g. the deferred
-// per-role model override noted in docs/SPEC.md D2.
+// side id, or RoleJudge.
 type Role string
 
 // RoleJudge is the fixed role id for the neutral adjudicator.
@@ -63,19 +56,21 @@ type StreamEvent struct {
 	Err          error
 }
 
-// ChatClient sends a role's full message history to a model and streams back
-// its response. Implementations decide how (or whether) history for
-// different roles shares an underlying model instance; the orchestrator
-// only depends on this interface, which keeps it unit-testable without a
-// real model.
+// ChatClient sends a role's full message history to a model and streams back its response.
 type ChatClient interface {
 	ChatStreaming(ctx context.Context, role Role, messages []ChatMessage, toolSpecs []tools.Spec) (<-chan StreamEvent, error)
 }
 
-// Config configures one debate run. SessionID, Title, and CreatedAt are
-// assigned by the caller (see internal/archive naming helpers) so the
-// orchestrator itself stays free of clock/ID concerns and easy to test
-// deterministically.
+type LogFunc func(msg string, args ...any)
+
+// Engine is a ChatClient whose model must be loaded via Initialize before
+// any ChatStreaming call to allow for lazy initialization.
+type Engine interface {
+	ChatClient
+	Initialize(ctx context.Context, modelSource string, log LogFunc) error
+}
+
+// Config holds the configuration of a debate.
 type Config struct {
 	SessionID       string
 	Title           string

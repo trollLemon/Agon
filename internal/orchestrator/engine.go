@@ -27,10 +27,7 @@ const DefaultModel = "Qwen/Qwen3-8B-Q8_0"
 
 // Bootstrap installs (if needed) the native inference libraries and the
 // given model, then loads it in-process with the incremental message cache
-// enabled — one loaded model instance plays every role (see docs/SPEC.md
-// D2, D7). Progress is reported through logger (kronk.FmtLogger writes to
-// stdout; callers driving a UI can supply their own). First run may take a
-// while (downloads); callers should give ctx a generous deadline.
+// enabled.
 func Bootstrap(ctx context.Context, modelSource string, logger kronk.Logger) (*kronk.Kronk, error) {
 	if modelSource == "" {
 		modelSource = DefaultModel
@@ -71,24 +68,47 @@ func Bootstrap(ctx context.Context, modelSource string, logger kronk.Logger) (*k
 	return krn, nil
 }
 
-// KronkClient adapts a single loaded *kronk.Kronk instance into the
-// ChatClient interface the debate loop drives. Every role shares this one
-// client: kronk's incremental message cache matches each call's message
-// prefix and reuses KV automatically, so per-role histories stay cheap
-// without the app ever passing an explicit session id (docs/SPEC.md D2).
-type KronkClient struct {
+// KronkEngine implements Engine
+type KronkEngine struct {
 	krn *kronk.Kronk
 }
 
-var _ ChatClient = (*KronkClient)(nil)
+var _ Engine = (*KronkEngine)(nil)
 
-// NewKronkClient wraps an already-loaded kronk instance.
-func NewKronkClient(krn *kronk.Kronk) *KronkClient {
-	return &KronkClient{krn: krn}
+// NewKronkEngine returns an uninitialized engine. Call Initialize with a
+// model source before using it as a ChatClient.
+func NewKronkEngine() *KronkEngine {
+	return &KronkEngine{}
 }
 
-// ChatStreaming implements ChatClient.
-func (k *KronkClient) ChatStreaming(ctx context.Context, role Role, messages []ChatMessage, toolSpecs []kronktools.Spec) (<-chan StreamEvent, error) {
+// Initialize bootstraps and loads a model.
+func (e *KronkEngine) Initialize(ctx context.Context, modelSource string, log LogFunc) error {
+	logger := func(_ context.Context, msg string, args ...any) {
+		if log != nil {
+			log(msg, args...)
+		}
+	}
+	krn, err := Bootstrap(ctx, modelSource, logger)
+	if err != nil {
+		return err
+	}
+	e.krn = krn
+	return nil
+}
+
+// Unload releases the loaded model from memory, on app shutdown. Safe to
+// call on an engine that was never initialized.
+func (e *KronkEngine) Unload(ctx context.Context) error {
+	if e.krn == nil {
+		return nil
+	}
+	shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return e.krn.Unload(shutdownCtx)
+}
+
+// ChatStreaming implements ChatClient for the KronkEngine.
+func (e *KronkEngine) ChatStreaming(ctx context.Context, role Role, messages []ChatMessage, toolSpecs []kronktools.Spec) (<-chan StreamEvent, error) {
 	doc := model.D{
 		"messages":    toModelMessages(messages),
 		"temperature": 0.7,
@@ -101,7 +121,7 @@ func (k *KronkClient) ChatStreaming(ctx context.Context, role Role, messages []C
 		doc["tool_selection"] = "auto"
 	}
 
-	ch, err := k.krn.ChatStreaming(ctx, doc)
+	ch, err := e.krn.ChatStreaming(ctx, doc)
 	if err != nil {
 		return nil, err
 	}
@@ -200,11 +220,4 @@ func toToolCallRequests(calls []model.ResponseToolCall) []ToolCallRequest {
 		out = append(out, ToolCallRequest{ID: c.ID, Name: c.Function.Name, Arguments: c.Function.Arguments})
 	}
 	return out
-}
-
-// Unload releases the model from memory. Call it once, on app shutdown.
-func Unload(ctx context.Context, krn *kronk.Kronk) error {
-	shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	return krn.Unload(shutdownCtx)
 }
