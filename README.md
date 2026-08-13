@@ -12,7 +12,7 @@ MCP server you connected a harness to. I also tried this in go.
 This worked, but I didn't like the idea of having to start the server each time, and connecting
 the harness afterwards before I could use this feature.
 
-I attended GopherconUK 2026, and got particularly excited about the [Kronk]() package: a go API that provided local inference with LLMs, 
+I attended GopherconUK 2026, and got particularly excited about the [Kronk](https://github.com/ardanlabs/kronk) package: a go API that provided local inference with LLMs, 
 with the intent to remove the need for a model server (or mcp server).
 
 I wanted to experiment with using a spec document to guide an LLM on autopilot, rather than traditional
