@@ -26,37 +26,10 @@ const (
 	screenArchive
 )
 
-// Bootstrapper loads a chat-capable model client, e.g. via
-// orchestrator.Bootstrap + orchestrator.NewKronkClient. Tests inject a fake
-// one so the TUI never needs a real model. log receives progress/log lines
-// as they happen (native library detection/download, model download, model
-// load) so a slow first run isn't a silent black box; it may be nil.
-type Bootstrapper func(ctx context.Context, modelSource string, log BootLogFunc) (orchestrator.ChatClient, error)
-
-// BootLogFunc receives one bootstrap log line. It mirrors kronk.Logger's
-// msg+args shape (minus the context parameter, which the tui package has
-// no reason to depend on kronk to spell) so defaultBootstrapper can adapt
-// it directly.
-type BootLogFunc func(msg string, args ...any)
-
-func defaultBootstrapper(ctx context.Context, modelSource string, log BootLogFunc) (orchestrator.ChatClient, error) {
-	logger := func(_ context.Context, msg string, args ...any) {
-		if log != nil {
-			log(msg, args...)
-		}
-	}
-	krn, err := orchestrator.Bootstrap(ctx, modelSource, logger)
-	if err != nil {
-		return nil, err
-	}
-	return orchestrator.NewKronkClient(krn), nil
-}
-
 // Options configures a new App.
 type Options struct {
 	ArchiveDir   string
 	DefaultModel string
-	Bootstrap    Bootstrapper // nil selects the real kronk-backed bootstrapper
 }
 
 // App is the root Bubble Tea model.
@@ -66,9 +39,9 @@ type App struct {
 
 	archiveDir   string
 	defaultModel string
-	bootstrap    Bootstrapper
 
-	client        orchestrator.ChatClient
+	engine        orchestrator.Engine
+	initialized   bool
 	bootstrapping bool
 	bootstrapErr  error
 	bootLog       *bootLog
@@ -83,8 +56,8 @@ type App struct {
 	live *liveDebate // at most one at a time (D9)
 }
 
-// pendingDebate holds a validated form submission while the model client is
-// still being bootstrapped.
+// pendingDebate holds a validated form submission while the model is still
+// being initialized.
 type pendingDebate struct {
 	topic, context string
 	mode           prompts.Mode
@@ -93,11 +66,11 @@ type pendingDebate struct {
 	model          string
 }
 
-// New creates the root App model.
-func New(opts Options) *App {
-	if opts.Bootstrap == nil {
-		opts.Bootstrap = defaultBootstrapper
-	}
+// New creates the root App model. engine is the (uninitialized) model
+// backend the app drives; it is injected so tests can supply a fake that
+// never loads a real model, while production passes an
+// orchestrator.KronkEngine.
+func New(opts Options, engine orchestrator.Engine) *App {
 	if opts.DefaultModel == "" {
 		opts.DefaultModel = orchestrator.DefaultModel
 	}
@@ -105,7 +78,7 @@ func New(opts Options) *App {
 		screen:       screenMenu,
 		archiveDir:   opts.ArchiveDir,
 		defaultModel: opts.DefaultModel,
-		bootstrap:    opts.Bootstrap,
+		engine:       engine,
 		menu:         newMenuModel(),
 		form:         newFormModel(opts.DefaultModel),
 		bootScreen:   newBootstrapModel(),
@@ -115,8 +88,8 @@ func New(opts Options) *App {
 }
 
 // Run starts the Bubble Tea program and blocks until the user quits.
-func Run(opts Options) error {
-	p := tea.NewProgram(New(opts), tea.WithAltScreen())
+func Run(opts Options, engine orchestrator.Engine) error {
+	p := tea.NewProgram(New(opts, engine), tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }
@@ -162,7 +135,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.bootScreen.setError(msg.err)
 			return a, nil
 		}
-		a.client = msg.client
+		a.initialized = true
 		return a.launchPendingDebate()
 
 	case openArchivedMsg:
@@ -230,7 +203,7 @@ func (a *App) startDebate(msg startDebateMsg) (tea.Model, tea.Cmd) {
 		topic: msg.topic, context: msg.context, mode: msg.mode,
 		tone: msg.tone, rounds: msg.rounds, model: msg.model,
 	}
-	if a.client != nil {
+	if a.initialized {
 		return a.launchPendingDebate()
 	}
 
@@ -241,12 +214,12 @@ func (a *App) startDebate(msg startDebateMsg) (tea.Model, tea.Cmd) {
 	a.bootScreen.start(bl)
 	a.screen = screenBootstrap
 	modelSource := msg.model
-	bootstrap := a.bootstrap
+	engine := a.engine
 	bootstrapCmd := func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
-		client, err := bootstrap(ctx, modelSource, bl.append)
-		return bootstrapDoneMsg{client: client, err: err}
+		err := engine.Initialize(ctx, modelSource, bl.append)
+		return bootstrapDoneMsg{err: err}
 	}
 	return a, tea.Batch(bootstrapCmd, waitForBootLog())
 }
@@ -282,7 +255,7 @@ func (a *App) launchPendingDebate() (tea.Model, tea.Cmd) {
 		CreatedAt:       now,
 	}
 
-	a.live = startLiveDebate(cfg, a.client, sandbox, a.archiveDir)
+	a.live = startLiveDebate(cfg, a.engine, sandbox, a.archiveDir)
 	a.session.showLive(a.live)
 	a.screen = screenSession
 	return a, waitForLiveUpdate(a.live)

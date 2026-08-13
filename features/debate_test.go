@@ -1,6 +1,6 @@
 // Package features drives the goagentdisc TUI through godog BDD scenarios
 // (docs/SPEC.md D12), using teatest so the app runs exactly as it would in a
-// real terminal and a fake ChatClient so no real model is ever loaded.
+// real terminal and a fake Engine so no real model is ever loaded.
 package features
 
 import (
@@ -83,11 +83,15 @@ func initializeScenario(t *testing.T) func(*godog.ScenarioContext) {
 	}
 }
 
-// fakeChatClient is a deterministic, instant ChatClient so BDD scenarios
-// never touch a real model.
-type fakeChatClient struct{}
+// fakeEngine is a deterministic, instant Engine so BDD scenarios never
+// touch a real model. Initialize is a no-op.
+type fakeEngine struct{}
 
-func (fakeChatClient) ChatStreaming(ctx context.Context, role orchestrator.Role, messages []orchestrator.ChatMessage, toolSpecs []tools.Spec) (<-chan orchestrator.StreamEvent, error) {
+func (fakeEngine) Initialize(ctx context.Context, modelSource string, log orchestrator.LogFunc) error {
+	return nil
+}
+
+func (fakeEngine) ChatStreaming(ctx context.Context, role orchestrator.Role, messages []orchestrator.ChatMessage, toolSpecs []tools.Spec) (<-chan orchestrator.StreamEvent, error) {
 	ch := make(chan orchestrator.StreamEvent, 2)
 	go func() {
 		defer close(ch)
@@ -96,15 +100,16 @@ func (fakeChatClient) ChatStreaming(ctx context.Context, role orchestrator.Role,
 	return ch, nil
 }
 
-func fakeBootstrap(ctx context.Context, modelSource string, log tui.BootLogFunc) (orchestrator.ChatClient, error) {
-	return fakeChatClient{}, nil
+// blockingEngine never produces a response until its context is canceled, so
+// the abort scenario can reliably catch a debate mid-turn. Initialize
+// succeeds immediately.
+type blockingEngine struct{}
+
+func (blockingEngine) Initialize(ctx context.Context, modelSource string, log orchestrator.LogFunc) error {
+	return nil
 }
 
-// blockingChatClient never produces a response until its context is
-// canceled, so the abort scenario can reliably catch a debate mid-turn.
-type blockingChatClient struct{}
-
-func (blockingChatClient) ChatStreaming(ctx context.Context, role orchestrator.Role, messages []orchestrator.ChatMessage, toolSpecs []tools.Spec) (<-chan orchestrator.StreamEvent, error) {
+func (blockingEngine) ChatStreaming(ctx context.Context, role orchestrator.Role, messages []orchestrator.ChatMessage, toolSpecs []tools.Spec) (<-chan orchestrator.StreamEvent, error) {
 	ch := make(chan orchestrator.StreamEvent)
 	go func() {
 		defer close(ch)
@@ -113,25 +118,21 @@ func (blockingChatClient) ChatStreaming(ctx context.Context, role orchestrator.R
 	return ch, nil
 }
 
-func blockingBootstrap(ctx context.Context, modelSource string, log tui.BootLogFunc) (orchestrator.ChatClient, error) {
-	return blockingChatClient{}, nil
-}
-
-func (w *world) newApp(bootstrap tui.Bootstrapper) {
+func (w *world) newApp(engine orchestrator.Engine) {
 	if w.archiveDir == "" {
 		w.archiveDir = w.t.TempDir()
 	}
-	app := tui.New(tui.Options{ArchiveDir: w.archiveDir, Bootstrap: bootstrap})
+	app := tui.New(tui.Options{ArchiveDir: w.archiveDir}, engine)
 	w.tm = teatest.NewTestModel(w.t, app, teatest.WithInitialTermSize(120, 40))
 	w.waitFor("Start a new debate")
 }
 
 func (w *world) theAppIsOpen() {
-	w.newApp(fakeBootstrap)
+	w.newApp(fakeEngine{})
 }
 
 func (w *world) theAppIsOpenBlocking() {
-	w.newApp(blockingBootstrap)
+	w.newApp(blockingEngine{})
 }
 
 func (w *world) anArchivedDebateTitledExists(title string) error {

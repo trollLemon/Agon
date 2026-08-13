@@ -2,7 +2,6 @@ package tui
 
 import (
 	"github.com/agentdisc/goagentdisc/internal/archive"
-	"github.com/agentdisc/goagentdisc/internal/orchestrator"
 	"github.com/agentdisc/goagentdisc/internal/prompts"
 )
 
@@ -19,10 +18,10 @@ type startDebateMsg struct {
 	model   string
 }
 
-// bootstrapDoneMsg reports the result of lazily loading the model client.
+// bootstrapDoneMsg reports the result of lazily initializing the model
+// engine (loading the chosen model). The engine itself is held on the App.
 type bootstrapDoneMsg struct {
-	client orchestrator.ChatClient
-	err    error
+	err error
 }
 
 // openArchivedMsg requests opening a session (live or archived) by id.

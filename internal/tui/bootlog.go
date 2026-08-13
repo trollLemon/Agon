@@ -18,7 +18,7 @@ const maxBootLogLines = 500
 // detection/download, model download, model load) so the form screen can
 // show them live instead of leaving the user staring at a bare "Loading
 // model…" with no way to tell whether it's stuck or just downloading a
-// multi-gigabyte file. Safe for concurrent use: BootLogFunc is called from
+// multi-gigabyte file. Safe for concurrent use: append is called from
 // the bootstrap goroutine while the UI reads tail() from the Bubble Tea
 // event loop.
 type bootLog struct {

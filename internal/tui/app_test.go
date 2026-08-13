@@ -36,7 +36,7 @@ func waitForAllText(t *testing.T, tm *teatest.TestModel, texts ...string) {
 
 func TestNewDebateEndToEnd(t *testing.T) {
 	dir := t.TempDir()
-	app := New(Options{ArchiveDir: dir, Bootstrap: fakeBootstrap})
+	app := New(Options{ArchiveDir: dir}, fakeEngine{})
 	tm := teatest.NewTestModel(t, app, teatest.WithInitialTermSize(120, 40))
 
 	waitForText(t, tm, "Start a new debate")
@@ -90,7 +90,7 @@ func TestBrowseArchivedSessionReadOnly(t *testing.T) {
 		t.Fatalf("archive.Write: %v", err)
 	}
 
-	app := New(Options{ArchiveDir: dir, Bootstrap: fakeBootstrap})
+	app := New(Options{ArchiveDir: dir}, fakeEngine{})
 	tm := teatest.NewTestModel(t, app, teatest.WithInitialTermSize(120, 40))
 
 	waitForText(t, tm, "Start a new debate")
@@ -110,8 +110,8 @@ func TestBrowseArchivedSessionReadOnly(t *testing.T) {
 
 func TestAbortDiscardsLiveDebate(t *testing.T) {
 	dir := t.TempDir()
-	client := newBlockingChatClient()
-	app := New(Options{ArchiveDir: dir, Bootstrap: blockingBootstrap(client)})
+	engine := blockingEngine{}
+	app := New(Options{ArchiveDir: dir}, engine)
 	tm := teatest.NewTestModel(t, app, teatest.WithInitialTermSize(120, 40))
 
 	waitForText(t, tm, "Start a new debate")
@@ -147,11 +147,11 @@ func TestAbortDiscardsLiveDebate(t *testing.T) {
 // TestBootstrapLogVisibleWhileLoading exercises the exact bug reported by a
 // user: the form screen showed a bare "Loading model…" for as long as
 // bootstrap ran, with zero visibility into whether it was progressing or
-// stuck. Bootstrapper's log callback should surface on screen while the
+// stuck. The engine's Initialize log callback should surface on screen while
 // model client is still loading.
 func TestBootstrapLogVisibleWhileLoading(t *testing.T) {
 	dir := t.TempDir()
-	app := New(Options{ArchiveDir: dir, Bootstrap: slowLoggingBootstrap(300 * time.Millisecond)})
+	app := New(Options{ArchiveDir: dir}, newSlowLoggingEngine(300*time.Millisecond))
 	tm := teatest.NewTestModel(t, app, teatest.WithInitialTermSize(120, 40))
 
 	waitForText(t, tm, "Start a new debate")
