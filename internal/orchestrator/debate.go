@@ -110,7 +110,7 @@ func (d *Debate) emit(ev Event) {
 
 // Run executes the full debate: advocate/critic rounds, then a single judge
 // turn. On success it returns the completed archive.Session, ready to be
-// written exactly once by the caller (see docs/SPEC.md D5). On error or
+// written exactly once by the caller. On error or
 // abort it returns a zero-value Session and a non-nil error — nothing
 // should be archived in that case.
 func (d *Debate) Run(parent context.Context) (archive.Session, error) {

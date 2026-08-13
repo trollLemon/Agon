@@ -40,7 +40,7 @@ type liveSnapshot struct {
 // liveDebate runs an orchestrator.Debate in a background goroutine that is
 // independent of whether any screen is watching it, continuously drains its
 // events into an accumulated snapshot, and writes the archive exactly once
-// on success (docs/SPEC.md D5, D8, D9).
+// on success.
 type liveDebate struct {
 	sessionID  string
 	cfg        orchestrator.Config
@@ -116,7 +116,7 @@ func (ld *liveDebate) drainEvents() {
 }
 
 // run drives the debate to completion and, on success, writes the archive
-// exactly once (docs/SPEC.md D5) before marking the snapshot done. It waits
+// exactly once before marking the snapshot done. It waits
 // for drainEvents to finish folding every event first, so a caller that
 // sees done=true always sees the final verdict too.
 func (ld *liveDebate) run() {

@@ -13,7 +13,7 @@ import (
 )
 
 // formField identifies one focusable element of the new-debate form
-// (docs/SPEC.md D8: topic, starting context, mode, tone, rounds, model).
+// (topic, starting context, mode, tone, rounds, model).
 type formField int
 
 const (

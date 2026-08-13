@@ -1,5 +1,5 @@
 // Package tui implements the Bubble Tea application: menu, new-debate form,
-// session view (live or archived), and archive list (see docs/SPEC.md D8).
+// session view (live or archived), and archive list.
 package tui
 
 import (
