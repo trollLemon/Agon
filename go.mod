@@ -1,4 +1,4 @@
-module github.com/agentdisc/goagentdisc
+module github.com/trollLemon/agon
 
 go 1.26.5
 

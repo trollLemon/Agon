@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"github.com/agentdisc/goagentdisc/internal/archive"
-	"github.com/agentdisc/goagentdisc/internal/prompts"
+	"github.com/trollLemon/agon/internal/archive"
+	"github.com/trollLemon/agon/internal/prompts"
 )
 
 // switchScreenMsg requests a screen change.

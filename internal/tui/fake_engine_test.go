@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/agentdisc/goagentdisc/internal/orchestrator"
-	"github.com/agentdisc/goagentdisc/internal/tools"
+	"github.com/trollLemon/agon/internal/orchestrator"
+	"github.com/trollLemon/agon/internal/tools"
 )
 
 // fakeEngine is a deterministic, instant Engine used by tui tests so they

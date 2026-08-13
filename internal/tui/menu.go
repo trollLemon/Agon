@@ -54,7 +54,7 @@ func (m menuModel) update(msg tea.KeyMsg, a *App) (tea.Model, tea.Cmd) {
 
 func (m menuModel) View(live *liveDebate) string {
 	var b strings.Builder
-	b.WriteString("goagentdisc — two-agent debates\n\n")
+	b.WriteString("agon — two-agent debates\n\n")
 	for i, item := range m.items(live) {
 		cursor := "  "
 		if i == m.cursor {

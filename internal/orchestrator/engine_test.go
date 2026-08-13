@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/agentdisc/goagentdisc/internal/tools"
+	"github.com/trollLemon/agon/internal/tools"
 )
 
 // scriptStep describes one canned model reply for the fake client, keyed by

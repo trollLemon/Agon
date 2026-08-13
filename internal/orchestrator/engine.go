@@ -11,7 +11,7 @@ import (
 	"github.com/ardanlabs/kronk/sdk/tools/libs"
 	"github.com/ardanlabs/kronk/sdk/tools/models"
 
-	kronktools "github.com/agentdisc/goagentdisc/internal/tools"
+	kronktools "github.com/trollLemon/agon/internal/tools"
 )
 
 const DefaultModel = "Qwen/Qwen3-8B-Q8_0"

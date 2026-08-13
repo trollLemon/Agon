@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agentdisc/goagentdisc/internal/archive"
-	"github.com/agentdisc/goagentdisc/internal/prompts"
-	"github.com/agentdisc/goagentdisc/internal/tools"
+	"github.com/trollLemon/agon/internal/archive"
+	"github.com/trollLemon/agon/internal/prompts"
+	"github.com/trollLemon/agon/internal/tools"
 )
 
 func baseConfig(rounds int) Config {

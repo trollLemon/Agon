@@ -1,5 +1,5 @@
 Feature: Two-agent debates
-  As a user of goagentdisc
+  As a user of agon
   I want to start, watch, browse, and abort debates from the TUI
   So that I can get a neutral, evidence-grounded verdict on a proposition
 

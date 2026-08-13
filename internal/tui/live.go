@@ -8,9 +8,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/agentdisc/goagentdisc/internal/archive"
-	"github.com/agentdisc/goagentdisc/internal/orchestrator"
-	"github.com/agentdisc/goagentdisc/internal/tools"
+	"github.com/trollLemon/agon/internal/archive"
+	"github.com/trollLemon/agon/internal/orchestrator"
+	"github.com/trollLemon/agon/internal/tools"
 )
 
 // liveSnapshot is a rendering-friendly, point-in-time view of a debate:
