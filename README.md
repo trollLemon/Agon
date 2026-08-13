@@ -1,69 +1,74 @@
-# goagentdisc — two-agent debates in your terminal (Go)
+# agon 
+> or *agony* if you dont have enough VRAM.
 
-Pit two AI agents against each other over **any** proposition and get a reasoned verdict.
+Pit two AI agents against each other over any proposition and get a reasoned verdict.
 The proposition can be a design/architecture choice, a technical tradeoff, a strategy or
-policy, a factual claim, or a head-to-head **X vs Y** comparison.
+policy, or a head-to-head X vs Y comparison.
 
-goagentdisc is a single, self-contained terminal application. There is no server, no MCP
-tool, and no external harness: it loads a local model in-process via the
-[kronk](https://github.com/ardanlabs/kronk) SDK and runs the whole debate — advocate,
-critic, and a neutral judge — inside one binary, streaming the transcript to a
-[Bubble Tea](https://github.com/charmbracelet/bubbletea) TUI as it happens.
+## Motivation
+I had an idea for using two agents to debate over a topic and produce a verdict. My first implementation was a python based
+MCP server you connected a harness to. I also tried this in go.
+
+This worked, but I didn't like the idea of having to start the server each time, and connecting
+the harness afterwards before I could use this feature.
+
+I attended GopherconUK 2026, and got particularly excited about the [Kronk]() package: a go API that provided local inference with LLMs, 
+with the intent to remove the need for a model server (or mcp server).
+
+I wanted to experiment with using a spec document to guide an LLM on autopilot, rather than traditional
+prompting in a harness, to move from a MCP server architecture to a TUI app. I had a spec document and had Kimi K3 refine it. The spec details the requirements, constraints, and UX design choices I wanted. 
+I sent Sonnet 5 on the implementation.
+
+The result worked... but was quite bloated. I was happy with the general direction but saw a lot of room for 
+improvement in terms of design, maintainability, and code quality (you can see so in the commit history).
 
 ## Quick start
 
 ```bash
-go run ./cmd/goagentdisc
+go run ./cmd
 ```
 
 This opens the TUI at the main menu. There are no flags: everything (topic, starting
 context, mode, tone, rounds, model) is entered on the new-debate form.
 
-- **Start a new debate** — fill in the topic and (optionally) freeform starting context
-  (paste a repo path and a change description here to ground the debate in real code),
-  pick a mode/tone/round count, and submit. The first debate triggers a one-time model
-  download/load (progress shown on the form); the model is cached for later runs. The
-  model field defaults to `Qwen/Qwen3-8B-Q8_0` (~8.7GB) — a meaningfully stronger
-  instruction-follower than the smaller 0.6B/1.7B tiers, which are prone to ignoring
-  structural prompt constraints (e.g. drafting multiple rounds at once). If you have
-  the RAM to spare, type in a bigger model instead (e.g. `unsloth/gpt-oss-20b-Q8_0`
-  at ~12GB) for even better quality.
-- **Browse archive** — reopen any past debate, read-only.
+- **Start a new debate**: fill in the topic and (optionally) freeform starting context. You can specify
+   paths to documents, code, etc, which will be added into the models read only sandbox.
+- **Browse archive**: reopen any past debate, read-only.
 
 Archived debates are written to `debates/<session_id>.json` (one file per session,
-written exactly once when the verdict completes — a killed or crashed run leaves no
+written exactly once when the verdict completes; a killed or crashed run leaves no
 file).
 
 ## Screens & keys
 
-- **Menu** — `↑/↓` select · `enter` confirm · `ctrl+c` quit.
-- **New-debate form** — `tab`/`shift+tab` move between fields · `enter` next field (or
+- **Menu**: `↑/↓` select · `enter` confirm · `ctrl+c` quit.
+- **New-debate form**: `tab`/`shift+tab` move between fields · `enter` next field (or
   submit from the last field) · `ctrl+s` submit · `esc` cancel.
-- **Session view** (live or archived; exclusive full-screen — no menu chrome while a
-  debate is open) — `j/k` or `↑/↓` scroll the transcript · `a` abort the live debate
+- **Session view** (live or archived; exclusive full-screen, no menu chrome while a
+  debate is open): `j/k` or `↑/↓` scroll the transcript · `a` abort the live debate
   (with confirmation; discards the in-memory transcript, nothing is archived) · `esc`
   back to the menu (a live debate keeps running in the background; reopen it from the
   archive list, marked `●`, to resume watching) · `ctrl+c` quit the app.
-- **Archive list** — `↑/↓` select · `enter` open (read-only) · `esc` back to the menu.
+- **Archive list**: `↑/↓` select · `enter` open (read-only) · `esc` back to the menu.
 
 Only one debate can be live at a time; starting a new one while another is running is
 blocked until you finish or abort it.
 
 ## Debate modes
 
-- **`proposition`** (default) — one claim. `advocate` argues FOR, `critic` argues AGAINST.
-- **`versus`** — two named options compete; each side advocates its own option.
+- **`proposition`** (default): one claim. `advocate` argues FOR, `critic` argues AGAINST.
+- **`versus`**: two named options compete; each side advocates its own option.
 
 ## Tones
 
-`formal` (default), `informal`, `genz`, `unhinged`. Tone is **style only** — it never lowers
+`formal` (default), `informal`, `genz`, `unhinged`. Tone is **style only**; it never lowers
 the bar on substance, evidence, or honesty, and both sides share one tone so the debate stays
 even.
 
 ## Evidence & code debates
 
 Debaters back claims with **citations rendered as clickable markdown links** in the
-transcript — `[label](https://…)` for external facts, `[path:line](path#Lline)` for code.
+transcript: `[label](https://…)` for external facts, `[path:line](path#Lline)` for code.
 If the starting context contains a path that resolves to an existing directory, both
 sides get sandboxed, read-only tool access (`read_file`, `grep`, `list_dir`) to that repo
 so they can ground and cite real code; tool calls appear inline as collapsible `⚙` blocks
@@ -72,11 +77,11 @@ and are recorded in the archive alongside the messages.
 ## Layout
 
 ```
-cmd/goagentdisc/        # entrypoint: bootstrap only, opens the TUI
+cmd/                    # entrypoint: bootstrap only, opens the TUI
 internal/tui/           # bubbletea screens: menu, form, session view, archive list
 internal/orchestrator/  # debate loop: roles, rounds, turn order, tool sub-loop, kronk adapter
 internal/prompts/       # persona templates (advocate/critic/judge, modes, tones)
-internal/tools/         # read_file, grep, list_dir — sandboxed to the detected repo
+internal/tools/         # read_file, grep, list_dir (sandboxed to the detected repo)
 internal/archive/       # one-JSON-per-session: write-once, list, load
 features/               # godog BDD feature files, driven via teatest
 docs/                   # spec + architecture diagrams
@@ -95,7 +100,7 @@ go test ./features/...        # just the BDD scenarios (godog + teatest)
 ```
 
 - `internal/orchestrator`, `internal/archive`, `internal/prompts`, `internal/tools` are
-  unit-tested against a fake `ChatClient` — no real model, no TTY.
+  unit-tested against a fake `ChatClient`: no real model, no TTY.
 - `internal/tui` and `features/` drive the actual Bubble Tea app via
   [`teatest`](https://github.com/charmbracelet/x/tree/main/exp/teatest) with a fake
   `ChatClient`, so the whole app (menu → form → live debate → verdict → archive →

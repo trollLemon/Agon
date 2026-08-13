@@ -8,10 +8,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/agentdisc/goagentdisc/internal/archive"
-	"github.com/agentdisc/goagentdisc/internal/orchestrator"
-	"github.com/agentdisc/goagentdisc/internal/prompts"
-	"github.com/agentdisc/goagentdisc/internal/tools"
+	"github.com/trollLemon/agon/internal/archive"
+	"github.com/trollLemon/agon/internal/orchestrator"
+	"github.com/trollLemon/agon/internal/prompts"
+	"github.com/trollLemon/agon/internal/tools"
 )
 
 // screen identifies which of the app's four screens is rendered. Session

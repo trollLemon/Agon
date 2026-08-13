@@ -9,7 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 
-	"github.com/agentdisc/goagentdisc/internal/archive"
+	"github.com/trollLemon/agon/internal/archive"
 )
 
 // sessionView is a rendering-neutral snapshot of a debate: it comes either

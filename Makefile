@@ -1,14 +1,12 @@
 SHELL := /bin/bash
 
-BIN := goagentdisc
-PKG := ./cmd/goagentdisc
+BIN := agon
+PKG := ./cmd
 
 .DEFAULT_GOAL := help
 
 .PHONY: help
 help: ## Show this help
-	@echo "goagentdisc — two-agent debates in your terminal (Go)"
-	@echo
 	@echo "Usage: make <target>"
 	@echo
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \

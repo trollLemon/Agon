@@ -1,4 +1,4 @@
-// Package features drives the goagentdisc TUI through godog BDD scenarios
+// Package features drives the agon TUI through godog BDD scenarios
 // (docs/SPEC.md D12), using teatest so the app runs exactly as it would in a
 // real terminal and a fake Engine so no real model is ever loaded.
 package features
@@ -16,15 +16,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
 
-	"github.com/agentdisc/goagentdisc/internal/archive"
-	"github.com/agentdisc/goagentdisc/internal/orchestrator"
-	"github.com/agentdisc/goagentdisc/internal/tools"
-	"github.com/agentdisc/goagentdisc/internal/tui"
+	"github.com/trollLemon/agon/internal/archive"
+	"github.com/trollLemon/agon/internal/orchestrator"
+	"github.com/trollLemon/agon/internal/tools"
+	"github.com/trollLemon/agon/internal/tui"
 )
 
 func TestFeatures(t *testing.T) {
 	suite := godog.TestSuite{
-		Name:                "goagentdisc",
+		Name:                "agon",
 		ScenarioInitializer: initializeScenario(t),
 		Options: &godog.Options{
 			Format: "pretty",

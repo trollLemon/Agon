@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/agentdisc/goagentdisc/internal/prompts"
+	"github.com/trollLemon/agon/internal/prompts"
 )
 
 // formField identifies one focusable element of the new-debate form

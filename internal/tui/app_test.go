@@ -8,7 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
 
-	"github.com/agentdisc/goagentdisc/internal/archive"
+	"github.com/trollLemon/agon/internal/archive"
 )
 
 func waitForText(t *testing.T, tm *teatest.TestModel, text string) {

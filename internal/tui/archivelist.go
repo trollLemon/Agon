@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/agentdisc/goagentdisc/internal/archive"
+	"github.com/trollLemon/agon/internal/archive"
 )
 
 // archiveListModel is a cursor-based browser over archived sessions
