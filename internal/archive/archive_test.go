@@ -126,8 +126,8 @@ func TestListReturnsNewestFirst(t *testing.T) {
 	if len(got) != 2 || got[0].SessionID != "s-newer" || got[1].SessionID != "s-older" {
 		t.Fatalf("got %+v, want newest first", got)
 	}
-	if !got[0].HasVerdict {
-		t.Errorf("expected HasVerdict true")
+	if got[0].Verdict == "" {
+		t.Errorf("expected a verdict on the newest session")
 	}
 }
 

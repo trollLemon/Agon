@@ -4,8 +4,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,6 +21,7 @@ type screen int
 const (
 	screenMenu screen = iota
 	screenForm
+	screenBootstrap
 	screenSession
 	screenArchive
 )
@@ -77,6 +76,7 @@ type App struct {
 
 	menu        menuModel
 	form        formModel
+	bootScreen  bootstrapModel
 	archiveList archiveListModel
 	session     sessionModel
 
@@ -108,6 +108,7 @@ func New(opts Options) *App {
 		bootstrap:    opts.Bootstrap,
 		menu:         newMenuModel(),
 		form:         newFormModel(opts.DefaultModel),
+		bootScreen:   newBootstrapModel(),
 		archiveList:  newArchiveListModel(opts.ArchiveDir),
 		session:      newSessionModel(),
 	}
@@ -129,6 +130,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width, a.height = msg.Width, msg.Height
 		a.session.setSize(msg.Width, msg.Height)
+		a.bootScreen.setSize(msg.Width, msg.Height)
 		return a, nil
 
 	case tea.KeyMsg:
@@ -157,6 +159,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.bootstrapping = false
 		if msg.err != nil {
 			a.bootstrapErr = msg.err
+			a.bootScreen.setError(msg.err)
 			return a, nil
 		}
 		a.client = msg.client
@@ -170,6 +173,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case bootLogTickMsg:
 		if a.bootstrapping {
+			a.bootScreen.refresh()
 			return a, waitForBootLog()
 		}
 		return a, nil
@@ -185,21 +189,10 @@ func (a *App) View() string {
 	switch a.screen {
 	case screenSession:
 		return a.session.View()
+	case screenBootstrap:
+		return a.bootScreen.View()
 	case screenForm:
-		view := a.form.View()
-		if a.bootstrapping {
-			view += "\nLoading model… this can take a while on first run (downloading native " +
-				"libraries and model weights).\n"
-			if a.bootLog != nil {
-				if lines := a.bootLog.tail(12); len(lines) > 0 {
-					view += "\n" + strings.Join(lines, "\n") + "\n"
-				}
-			}
-		}
-		if a.bootstrapErr != nil {
-			view += fmt.Sprintf("\nError loading model: %v\n", a.bootstrapErr)
-		}
-		return view
+		return a.form.View()
 	case screenArchive:
 		return a.archiveList.View()
 	default:
@@ -215,6 +208,8 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.form, cmd = a.form.update(msg)
 		return a, cmd
+	case screenBootstrap:
+		return a.bootScreen.handleKey(msg, a)
 	case screenSession:
 		return a.session.update(msg, a)
 	case screenArchive:
@@ -243,6 +238,8 @@ func (a *App) startDebate(msg startDebateMsg) (tea.Model, tea.Cmd) {
 	a.bootstrapErr = nil
 	bl := newBootLog()
 	a.bootLog = bl
+	a.bootScreen.start(bl)
+	a.screen = screenBootstrap
 	modelSource := msg.model
 	bootstrap := a.bootstrap
 	bootstrapCmd := func() tea.Msg {
