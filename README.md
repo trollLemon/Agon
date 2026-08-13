@@ -5,6 +5,8 @@ Pit two AI agents against each other over any proposition and get a reasoned ver
 The proposition can be a design/architecture choice, a technical tradeoff, a strategy or
 policy, or a head-to-head X vs Y comparison.
 
+The name comes from [Ancient Greek drama](https://en.wikipedia.org/wiki/Agon#:~:text=%5B9%5D-,Theater)
+
 ## Motivation
 I had an idea for using two agents to debate over a topic and produce a verdict. My first implementation was a python based
 MCP server you connected a harness to. I also tried this in go.
