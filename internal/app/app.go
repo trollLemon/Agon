@@ -17,6 +17,16 @@ import (
 	"github.com/trollLemon/agon/internal/tui"
 )
 
+// AppState holds the current state of the app:
+// - initializing: setting up required libs and agents
+// - initialized: ready for a debate.
+type AppState int
+
+const (
+	Initializing AppState = iota
+	Initialized
+)
+
 // Options configures a new App.
 type Options struct {
 	ArchiveDir   string
@@ -31,12 +41,11 @@ type App struct {
 	archiveDir   string
 	defaultModel string
 
-	engine        orchestrator.Engine
-	initialized   bool
-	bootstrapping bool
-	bootstrapErr  error
-	bootLog       *tui.BootLog
-	pending       *pendingDebate
+	engine         orchestrator.Engine
+	state          AppState
+	initializedErr error
+	bootLog        *tui.BootLog
+	pending        *pendingDebate
 
 	menu        tui.MenuModel
 	form        tui.FormModel
@@ -127,13 +136,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.startDebate(msg)
 
 	case tui.BootstrapDoneMsg:
-		a.bootstrapping = false
 		if msg.Err != nil {
-			a.bootstrapErr = msg.Err
+			a.initializedErr = msg.Err
 			a.bootScreen.SetError(msg.Err)
 			return a, nil
 		}
-		a.initialized = true
+
+		a.state = Initialized
 		return a.launchPendingDebate()
 
 	case tui.OpenArchivedMsg:
@@ -143,7 +152,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleLiveUpdate(msg)
 
 	case tui.BootLogTickMsg:
-		if a.bootstrapping {
+		if a.state == Initializing {
 			a.bootScreen.Refresh()
 			return a, tui.WaitForBootLog()
 		}
@@ -200,12 +209,11 @@ func (a *App) startDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 		topic: msg.Topic, context: msg.Context, mode: msg.Mode,
 		tone: msg.Tone, rounds: msg.Rounds, model: msg.Model,
 	}
-	if a.initialized {
+	if a.state == Initialized {
 		return a.launchPendingDebate()
 	}
 
-	a.bootstrapping = true
-	a.bootstrapErr = nil
+	a.initializedErr = nil
 	bl := tui.NewBootLog()
 	a.bootLog = bl
 	a.bootScreen.Start(bl)
