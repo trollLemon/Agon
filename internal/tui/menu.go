@@ -7,52 +7,50 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// menuModel is the app's landing screen: a simple cursor-based list of
-// actions.
-type menuModel struct {
+// MenuModel is the landing screen: a simple cursor-based list of actions.
+type MenuModel struct {
 	cursor int
 }
 
-func newMenuModel() menuModel { return menuModel{} }
+func NewMenuModel() MenuModel { return MenuModel{} }
 
 // items returns the menu's current entries; "Resume live debate" only
 // appears while a debate is running.
-func (m menuModel) items(live *liveDebate) []string {
+func (m MenuModel) items(live *LiveDebate) []string {
 	items := []string{"Start a new debate", "Browse archive"}
-	if live != nil && !live.isDone() {
+	if live != nil && !live.IsDone() {
 		items = append(items, "Resume live debate")
 	}
 	return items
 }
 
-func (m menuModel) update(msg tea.KeyMsg, a *App) (tea.Model, tea.Cmd) {
-	items := m.items(a.live)
+// Update handles a keypress. Screen transitions are requested via
+// SwitchScreenMsg commands; the root model owns the actual switch.
+func (m MenuModel) Update(msg tea.KeyMsg, live *LiveDebate) (MenuModel, tea.Cmd) {
+	items := m.items(live)
 	switch msg.String() {
 	case "up", "k":
-		if a.menu.cursor > 0 {
-			a.menu.cursor--
+		if m.cursor > 0 {
+			m.cursor--
 		}
 	case "down", "j":
-		if a.menu.cursor < len(items)-1 {
-			a.menu.cursor++
+		if m.cursor < len(items)-1 {
+			m.cursor++
 		}
 	case "enter":
-		switch items[a.menu.cursor] {
+		switch items[m.cursor] {
 		case "Start a new debate":
-			a.form = newFormModel(a.defaultModel)
-			return a, func() tea.Msg { return switchScreenMsg{screen: screenForm} }
+			return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenForm} }
 		case "Browse archive":
-			return a, func() tea.Msg { return switchScreenMsg{screen: screenArchive} }
+			return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenArchive} }
 		case "Resume live debate":
-			a.session.showLive(a.live)
-			a.screen = screenSession
-			return a, waitForLiveUpdate(a.live)
+			return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenSession} }
 		}
 	}
-	return a, nil
+	return m, nil
 }
 
-func (m menuModel) View(live *liveDebate) string {
+func (m MenuModel) View(live *LiveDebate) string {
 	var b strings.Builder
 	b.WriteString("agon — two-agent debates\n\n")
 	for i, item := range m.items(live) {

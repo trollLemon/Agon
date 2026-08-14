@@ -37,11 +37,11 @@ type liveSnapshot struct {
 	err     error
 }
 
-// liveDebate runs an orchestrator.Debate in a background goroutine that is
+// LiveDebate runs an orchestrator.Debate in a background goroutine that is
 // independent of whether any screen is watching it, continuously drains its
 // events into an accumulated snapshot, and writes the archive exactly once
 // on success.
-type liveDebate struct {
+type LiveDebate struct {
 	sessionID  string
 	cfg        orchestrator.Config
 	debate     *orchestrator.Debate
@@ -61,10 +61,10 @@ type liveDebate struct {
 	err            error
 }
 
-// startLiveDebate creates a Debate from cfg and launches it, along with the
+// StartLiveDebate creates a Debate from cfg and launches it, along with the
 // goroutines that drain its events and persist the archive on completion.
-func startLiveDebate(cfg orchestrator.Config, client orchestrator.ChatClient, sandbox *tools.Sandbox, archiveDir string) *liveDebate {
-	ld := &liveDebate{
+func StartLiveDebate(cfg orchestrator.Config, client orchestrator.ChatClient, sandbox *tools.Sandbox, archiveDir string) *LiveDebate {
+	ld := &LiveDebate{
 		sessionID:  cfg.SessionID,
 		cfg:        cfg,
 		debate:     orchestrator.New(cfg, client, sandbox),
@@ -79,7 +79,7 @@ func startLiveDebate(cfg orchestrator.Config, client orchestrator.ChatClient, sa
 // drainEvents continuously consumes the debate's event stream and folds it
 // into the accumulated snapshot. It runs for the debate's whole lifetime,
 // regardless of whether a screen is currently displaying it.
-func (ld *liveDebate) drainEvents() {
+func (ld *LiveDebate) drainEvents() {
 	defer close(ld.drained)
 	for ev := range ld.debate.Events() {
 		ld.mu.Lock()
@@ -119,7 +119,7 @@ func (ld *liveDebate) drainEvents() {
 // exactly once before marking the snapshot done. It waits
 // for drainEvents to finish folding every event first, so a caller that
 // sees done=true always sees the final verdict too.
-func (ld *liveDebate) run() {
+func (ld *LiveDebate) run() {
 	sess, err := ld.debate.Run(context.Background())
 	<-ld.drained
 
@@ -136,7 +136,13 @@ func (ld *liveDebate) run() {
 	}
 }
 
-func (ld *liveDebate) isDone() bool {
+// SessionID returns the archived-session identifier for this debate.
+func (ld *LiveDebate) SessionID() string { return ld.sessionID }
+
+// Abort terminates the debate with the given reason recorded.
+func (ld *LiveDebate) Abort(reason string) { ld.debate.Abort(reason) }
+
+func (ld *LiveDebate) IsDone() bool {
 	if ld == nil {
 		return true
 	}
@@ -145,7 +151,7 @@ func (ld *liveDebate) isDone() bool {
 	return ld.done
 }
 
-func (ld *liveDebate) snapshot() liveSnapshot {
+func (ld *LiveDebate) snapshot() liveSnapshot {
 	ld.mu.Lock()
 	defer ld.mu.Unlock()
 	sides := make([]archive.Side, 2)
@@ -194,9 +200,9 @@ func (ld *liveDebate) snapshot() liveSnapshot {
 // steady poll always re-reads the latest state, so it can't get stuck.
 const liveUpdateInterval = 80 * time.Millisecond
 
-// waitForLiveUpdate schedules the next poll of ld's snapshot.
-func waitForLiveUpdate(ld *liveDebate) tea.Cmd {
+// WaitForLiveUpdate schedules the next poll of ld's snapshot.
+func WaitForLiveUpdate(ld *LiveDebate) tea.Cmd {
 	return tea.Tick(liveUpdateInterval, func(time.Time) tea.Msg {
-		return liveUpdateMsg{sessionID: ld.sessionID}
+		return LiveUpdateMsg{SessionID: ld.sessionID}
 	})
 }

@@ -5,31 +5,43 @@ import (
 	"github.com/trollLemon/agon/internal/prompts"
 )
 
-// switchScreenMsg requests a screen change.
-type switchScreenMsg struct{ screen screen }
+// Screen identifies which of the app's screens is rendered. Session view is
+// exclusive: while it is active, nothing else is drawn (D8).
+type Screen int
 
-// startDebateMsg carries a validated new-debate form submission.
-type startDebateMsg struct {
-	topic   string
-	context string
-	mode    prompts.Mode
-	tone    prompts.Tone
-	rounds  int
-	model   string
+const (
+	ScreenMenu Screen = iota
+	ScreenForm
+	ScreenBootstrap
+	ScreenSession
+	ScreenArchive
+)
+
+// SwitchScreenMsg requests a screen change.
+type SwitchScreenMsg struct{ Screen Screen }
+
+// StartDebateMsg carries a validated new-debate form submission.
+type StartDebateMsg struct {
+	Topic   string
+	Context string
+	Mode    prompts.Mode
+	Tone    prompts.Tone
+	Rounds  int
+	Model   string
 }
 
-// bootstrapDoneMsg reports the result of lazily initializing the model
-// engine (loading the chosen model). The engine itself is held on the App.
-type bootstrapDoneMsg struct {
-	err error
+// BootstrapDoneMsg reports the result of lazily initializing the model
+// engine (loading the chosen model).
+type BootstrapDoneMsg struct {
+	Err error
 }
 
-// openArchivedMsg requests opening a session (live or archived) by id.
-type openArchivedMsg struct{ sessionID string }
+// OpenArchivedMsg requests opening a session (live or archived) by id.
+type OpenArchivedMsg struct{ SessionID string }
 
-// liveUpdateMsg signals that a live debate has new events or finished; the
-// App re-renders whichever screen is displaying that session.
-type liveUpdateMsg struct{ sessionID string }
+// LiveUpdateMsg signals that a live debate has new events or finished; the
+// root model re-renders whichever screen is displaying that session.
+type LiveUpdateMsg struct{ SessionID string }
 
-// archiveListLoadedMsg carries a freshly reloaded archive listing.
-type archiveListLoadedMsg struct{ items []archive.Session }
+// ArchiveListLoadedMsg carries a freshly reloaded archive listing.
+type ArchiveListLoadedMsg struct{ Items []archive.Session }

@@ -9,60 +9,62 @@ import (
 	"github.com/trollLemon/agon/internal/archive"
 )
 
-// archiveListModel is a cursor-based browser over archived sessions.
-type archiveListModel struct {
+// ArchiveListModel is a cursor-based browser over archived sessions.
+type ArchiveListModel struct {
 	dir    string
 	items  []archive.Session
 	cursor int
 	err    error
 }
 
-func newArchiveListModel(dir string) archiveListModel {
-	return archiveListModel{dir: dir}
+func NewArchiveListModel(dir string) ArchiveListModel {
+	return ArchiveListModel{dir: dir}
 }
 
-// reload returns a tea.Cmd that re-reads the archive directory.
-func (m archiveListModel) reload() tea.Cmd {
+// Reload returns a tea.Cmd that re-reads the archive directory.
+func (m ArchiveListModel) Reload() tea.Cmd {
 	dir := m.dir
 	return func() tea.Msg {
 		items, err := archive.List(dir)
 		if err != nil {
-			return archiveListLoadedMsg{}
+			return ArchiveListLoadedMsg{}
 		}
-		return archiveListLoadedMsg{items: items}
+		return ArchiveListLoadedMsg{Items: items}
 	}
 }
 
-func (m *archiveListModel) setItems(items []archive.Session) {
+func (m *ArchiveListModel) SetItems(items []archive.Session) {
 	m.items = items
 	if m.cursor >= len(items) {
 		m.cursor = max(0, len(items)-1)
 	}
 }
 
-func (m *archiveListModel) update(msg tea.KeyMsg, a *App) (tea.Model, tea.Cmd) {
+// Update handles a keypress. Opening a session or leaving the screen is
+// requested via OpenArchivedMsg / SwitchScreenMsg commands.
+func (m ArchiveListModel) Update(msg tea.KeyMsg) (ArchiveListModel, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		return a, func() tea.Msg { return switchScreenMsg{screen: screenMenu} }
+		return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenMenu} }
 	case "up", "k":
-		if a.archiveList.cursor > 0 {
-			a.archiveList.cursor--
+		if m.cursor > 0 {
+			m.cursor--
 		}
 	case "down", "j":
-		if a.archiveList.cursor < len(a.archiveList.items)-1 {
-			a.archiveList.cursor++
+		if m.cursor < len(m.items)-1 {
+			m.cursor++
 		}
 	case "enter":
-		if len(a.archiveList.items) == 0 {
-			return a, nil
+		if len(m.items) == 0 {
+			return m, nil
 		}
-		sessionID := a.archiveList.items[a.archiveList.cursor].SessionID
-		return a, func() tea.Msg { return openArchivedMsg{sessionID: sessionID} }
+		sessionID := m.items[m.cursor].SessionID
+		return m, func() tea.Msg { return OpenArchivedMsg{SessionID: sessionID} }
 	}
-	return a, nil
+	return m, nil
 }
 
-func (m archiveListModel) View() string {
+func (m ArchiveListModel) View() string {
 	var b strings.Builder
 	b.WriteString("Archived debates\n\n")
 	if len(m.items) == 0 {

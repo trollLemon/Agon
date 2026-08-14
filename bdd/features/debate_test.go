@@ -19,7 +19,7 @@ import (
 	"github.com/trollLemon/agon/internal/archive"
 	"github.com/trollLemon/agon/internal/orchestrator"
 	"github.com/trollLemon/agon/internal/tools"
-	"github.com/trollLemon/agon/internal/tui"
+	"github.com/trollLemon/agon/internal/app"
 )
 
 func TestFeatures(t *testing.T) {
@@ -122,7 +122,7 @@ func (w *world) newApp(engine orchestrator.Engine) {
 	if w.archiveDir == "" {
 		w.archiveDir = w.t.TempDir()
 	}
-	app := tui.New(tui.Options{ArchiveDir: w.archiveDir}, engine)
+	app := app.New(app.Options{ArchiveDir: w.archiveDir}, engine)
 	w.tm = teatest.NewTestModel(w.t, app, teatest.WithInitialTermSize(120, 40))
 	w.waitFor("Start a new debate")
 }

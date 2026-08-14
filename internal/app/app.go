@@ -1,6 +1,8 @@
-// Package tui implements the Bubble Tea application: menu, new-debate form,
-// session view (live or archived), and archive list.
-package tui
+// Package app is the root Bubble Tea model: it owns screen orchestration
+// (menu, new-debate form, bootstrap, live/archived session view, archive
+// list) and wires the tui package's screen components to the orchestrator,
+// archive, sandbox, and model engine.
+package app
 
 import (
 	"context"
@@ -12,18 +14,7 @@ import (
 	"github.com/trollLemon/agon/internal/orchestrator"
 	"github.com/trollLemon/agon/internal/prompts"
 	"github.com/trollLemon/agon/internal/tools"
-)
-
-// screen identifies which of the app's four screens is rendered. Session
-// view is exclusive: while it is active, nothing else is drawn (D8).
-type screen int
-
-const (
-	screenMenu screen = iota
-	screenForm
-	screenBootstrap
-	screenSession
-	screenArchive
+	"github.com/trollLemon/agon/internal/tui"
 )
 
 // Options configures a new App.
@@ -34,7 +25,7 @@ type Options struct {
 
 // App is the root Bubble Tea model.
 type App struct {
-	screen        screen
+	screen        tui.Screen
 	width, height int
 
 	archiveDir   string
@@ -44,16 +35,16 @@ type App struct {
 	initialized   bool
 	bootstrapping bool
 	bootstrapErr  error
-	bootLog       *bootLog
+	bootLog       *tui.BootLog
 	pending       *pendingDebate
 
-	menu        menuModel
-	form        formModel
-	bootScreen  bootstrapModel
-	archiveList archiveListModel
-	session     sessionModel
+	menu        tui.MenuModel
+	form        tui.FormModel
+	bootScreen  tui.BootstrapModel
+	archiveList tui.ArchiveListModel
+	session     tui.SessionModel
 
-	live *liveDebate
+	live *tui.LiveDebate
 }
 
 // pendingDebate holds a validated form submission while the model is still
@@ -73,15 +64,15 @@ func New(opts Options, engine orchestrator.Engine) *App {
 		opts.DefaultModel = orchestrator.DefaultModel
 	}
 	return &App{
-		screen:       screenMenu,
+		screen:       tui.ScreenMenu,
 		archiveDir:   opts.ArchiveDir,
 		defaultModel: opts.DefaultModel,
 		engine:       engine,
-		menu:         newMenuModel(),
-		form:         newFormModel(opts.DefaultModel),
-		bootScreen:   newBootstrapModel(),
-		archiveList:  newArchiveListModel(opts.ArchiveDir),
-		session:      newSessionModel(),
+		menu:         tui.NewMenuModel(),
+		form:         tui.NewFormModel(opts.DefaultModel),
+		bootScreen:   tui.NewBootstrapModel(),
+		archiveList:  tui.NewArchiveListModel(opts.ArchiveDir),
+		session:      tui.NewSessionModel(),
 	}
 }
 
@@ -93,64 +84,73 @@ func Run(opts Options, engine orchestrator.Engine) error {
 }
 
 func (a *App) Init() tea.Cmd {
-	return a.archiveList.reload()
+	return a.archiveList.Reload()
 }
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		a.width, a.height = msg.Width, msg.Height
-		a.session.setSize(msg.Width, msg.Height)
-		a.bootScreen.setSize(msg.Width, msg.Height)
+		a.session.SetSize(msg.Width, msg.Height)
+		a.bootScreen.SetSize(msg.Width, msg.Height)
 		return a, nil
 
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
 			if a.live != nil {
-				a.live.debate.Abort("app quit")
+				a.live.Abort("app quit")
 			}
 			return a, tea.Quit
 		}
 		return a.handleKey(msg)
 
-	case switchScreenMsg:
-		a.screen = msg.screen
-		if msg.screen == screenMenu && a.live.isDone() {
-			a.live = nil // free the one-at-a-time slot once it's archived
-		}
-		if msg.screen == screenArchive {
-			return a, a.archiveList.reload()
+	case tui.SwitchScreenMsg:
+		a.screen = msg.Screen
+		switch msg.Screen {
+		case tui.ScreenMenu:
+			if a.live.IsDone() {
+				a.live = nil // free the one-at-a-time slot once it's archived
+			}
+		case tui.ScreenForm:
+			a.form = tui.NewFormModel(a.defaultModel)
+		case tui.ScreenArchive:
+			return a, a.archiveList.Reload()
+		case tui.ScreenSession:
+			if a.live != nil {
+				a.session.ShowLive(a.live)
+				return a, tui.WaitForLiveUpdate(a.live)
+			}
 		}
 		return a, nil
 
-	case startDebateMsg:
+	case tui.StartDebateMsg:
 		return a.startDebate(msg)
 
-	case bootstrapDoneMsg:
+	case tui.BootstrapDoneMsg:
 		a.bootstrapping = false
-		if msg.err != nil {
-			a.bootstrapErr = msg.err
-			a.bootScreen.setError(msg.err)
+		if msg.Err != nil {
+			a.bootstrapErr = msg.Err
+			a.bootScreen.SetError(msg.Err)
 			return a, nil
 		}
 		a.initialized = true
 		return a.launchPendingDebate()
 
-	case openArchivedMsg:
-		return a.openArchived(msg.sessionID)
+	case tui.OpenArchivedMsg:
+		return a.openArchived(msg.SessionID)
 
-	case liveUpdateMsg:
+	case tui.LiveUpdateMsg:
 		return a.handleLiveUpdate(msg)
 
-	case bootLogTickMsg:
+	case tui.BootLogTickMsg:
 		if a.bootstrapping {
-			a.bootScreen.refresh()
-			return a, waitForBootLog()
+			a.bootScreen.Refresh()
+			return a, tui.WaitForBootLog()
 		}
 		return a, nil
 
-	case archiveListLoadedMsg:
-		a.archiveList.setItems(msg.items)
+	case tui.ArchiveListLoadedMsg:
+		a.archiveList.SetItems(msg.Items)
 		return a, nil
 	}
 	return a, nil
@@ -158,13 +158,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (a *App) View() string {
 	switch a.screen {
-	case screenSession:
+	case tui.ScreenSession:
 		return a.session.View()
-	case screenBootstrap:
+	case tui.ScreenBootstrap:
 		return a.bootScreen.View()
-	case screenForm:
+	case tui.ScreenForm:
 		return a.form.View()
-	case screenArchive:
+	case tui.ScreenArchive:
 		return a.archiveList.View()
 	default:
 		return a.menu.View(a.live)
@@ -172,34 +172,33 @@ func (a *App) View() string {
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
 	switch a.screen {
-	case screenMenu:
-		return a.menu.update(msg, a)
-	case screenForm:
-		var cmd tea.Cmd
-		a.form, cmd = a.form.update(msg)
-		return a, cmd
-	case screenBootstrap:
-		return a.bootScreen.handleKey(msg, a)
-	case screenSession:
-		return a.session.update(msg, a)
-	case screenArchive:
-		return a.archiveList.update(msg, a)
+	case tui.ScreenMenu:
+		a.menu, cmd = a.menu.Update(msg, a.live)
+	case tui.ScreenForm:
+		a.form, cmd = a.form.Update(msg)
+	case tui.ScreenBootstrap:
+		a.bootScreen, cmd = a.bootScreen.HandleKey(msg)
+	case tui.ScreenSession:
+		a.session, cmd = a.session.Update(msg, a.live)
+	case tui.ScreenArchive:
+		a.archiveList, cmd = a.archiveList.Update(msg)
 	}
-	return a, nil
+	return a, cmd
 }
 
 // startDebate handles a validated form submission: it detects a repo root
 // from the starting context, bootstraps the model client if needed, and
 // either launches immediately or waits for bootstrap to finish.
-func (a *App) startDebate(msg startDebateMsg) (tea.Model, tea.Cmd) {
-	if a.live != nil && !a.live.isDone() {
-		a.form.errMsg = "a debate is already running; finish or abort it first"
+func (a *App) startDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
+	if a.live != nil && !a.live.IsDone() {
+		a.form.SetError("a debate is already running; finish or abort it first")
 		return a, nil
 	}
 	a.pending = &pendingDebate{
-		topic: msg.topic, context: msg.context, mode: msg.mode,
-		tone: msg.tone, rounds: msg.rounds, model: msg.model,
+		topic: msg.Topic, context: msg.Context, mode: msg.Mode,
+		tone: msg.Tone, rounds: msg.Rounds, model: msg.Model,
 	}
 	if a.initialized {
 		return a.launchPendingDebate()
@@ -207,19 +206,19 @@ func (a *App) startDebate(msg startDebateMsg) (tea.Model, tea.Cmd) {
 
 	a.bootstrapping = true
 	a.bootstrapErr = nil
-	bl := newBootLog()
+	bl := tui.NewBootLog()
 	a.bootLog = bl
-	a.bootScreen.start(bl)
-	a.screen = screenBootstrap
-	modelSource := msg.model
+	a.bootScreen.Start(bl)
+	a.screen = tui.ScreenBootstrap
+	modelSource := msg.Model
 	engine := a.engine
 	bootstrapCmd := func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
-		err := engine.Initialize(ctx, modelSource, bl.append)
-		return bootstrapDoneMsg{err: err}
+		err := engine.Initialize(ctx, modelSource, bl.Append)
+		return tui.BootstrapDoneMsg{Err: err}
 	}
-	return a, tea.Batch(bootstrapCmd, waitForBootLog())
+	return a, tea.Batch(bootstrapCmd, tui.WaitForBootLog())
 }
 
 func (a *App) launchPendingDebate() (tea.Model, tea.Cmd) {
@@ -253,38 +252,38 @@ func (a *App) launchPendingDebate() (tea.Model, tea.Cmd) {
 		CreatedAt:       now,
 	}
 
-	a.live = startLiveDebate(cfg, a.engine, sandbox, a.archiveDir)
-	a.session.showLive(a.live)
-	a.screen = screenSession
-	return a, waitForLiveUpdate(a.live)
+	a.live = tui.StartLiveDebate(cfg, a.engine, sandbox, a.archiveDir)
+	a.session.ShowLive(a.live)
+	a.screen = tui.ScreenSession
+	return a, tui.WaitForLiveUpdate(a.live)
 }
 
 func (a *App) openArchived(sessionID string) (tea.Model, tea.Cmd) {
-	if a.live != nil && a.live.sessionID == sessionID {
-		a.session.showLive(a.live)
-		a.screen = screenSession
-		return a, waitForLiveUpdate(a.live)
+	if a.live != nil && a.live.SessionID() == sessionID {
+		a.session.ShowLive(a.live)
+		a.screen = tui.ScreenSession
+		return a, tui.WaitForLiveUpdate(a.live)
 	}
 	sess, err := archive.Load(a.archiveDir, sessionID)
 	if err != nil {
 		return a, nil
 	}
-	a.session.showArchived(sess)
-	a.screen = screenSession
+	a.session.ShowArchived(sess)
+	a.screen = tui.ScreenSession
 	return a, nil
 }
 
-func (a *App) handleLiveUpdate(msg liveUpdateMsg) (tea.Model, tea.Cmd) {
-	if a.live == nil || a.live.sessionID != msg.sessionID {
+func (a *App) handleLiveUpdate(msg tui.LiveUpdateMsg) (tea.Model, tea.Cmd) {
+	if a.live == nil || a.live.SessionID() != msg.SessionID {
 		return a, nil
 	}
-	if a.screen == screenSession && a.session.sessionID() == msg.sessionID {
-		a.session.refreshLive(a.live)
+	if a.screen == tui.ScreenSession && a.session.SessionID() == msg.SessionID {
+		a.session.RefreshLive(a.live)
 	}
-	if a.live.isDone() {
-		return a, a.archiveList.reload()
+	if a.live.IsDone() {
+		return a, a.archiveList.Reload()
 	}
-	return a, waitForLiveUpdate(a.live)
+	return a, tui.WaitForLiveUpdate(a.live)
 }
 
 // defaultSides returns the two sides for a mode. The current form has no

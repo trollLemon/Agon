@@ -26,8 +26,8 @@ const (
 	fieldCount
 )
 
-// formModel is the new-debate form.
-type formModel struct {
+// FormModel is the new-debate form.
+type FormModel struct {
 	focus   formField
 	topic   textinput.Model
 	context textarea.Model
@@ -38,7 +38,7 @@ type formModel struct {
 	errMsg  string
 }
 
-func newFormModel(defaultModel string) formModel {
+func NewFormModel(defaultModel string) FormModel {
 	topic := textinput.New()
 	topic.Placeholder = "The proposition or X vs Y under debate"
 	topic.Focus()
@@ -55,7 +55,7 @@ func newFormModel(defaultModel string) formModel {
 	model := textinput.New()
 	model.SetValue(defaultModel)
 
-	return formModel{
+	return FormModel{
 		focus:   fieldTopic,
 		topic:   topic,
 		context: ctx,
@@ -66,7 +66,7 @@ func newFormModel(defaultModel string) formModel {
 	}
 }
 
-func (m formModel) update(msg tea.KeyMsg) (formModel, tea.Cmd) {
+func (m FormModel) Update(msg tea.KeyMsg) (FormModel, tea.Cmd) {
 	switch msg.String() {
 	case "tab":
 		m.setFocus((m.focus + 1) % fieldCount)
@@ -77,7 +77,7 @@ func (m formModel) update(msg tea.KeyMsg) (formModel, tea.Cmd) {
 	case "ctrl+s":
 		return m.submit()
 	case "esc":
-		return m, func() tea.Msg { return switchScreenMsg{screen: screenMenu} }
+		return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenMenu} }
 	}
 
 	switch m.focus {
@@ -120,7 +120,10 @@ func (m formModel) update(msg tea.KeyMsg) (formModel, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *formModel) setFocus(f formField) {
+// SetError records a validation- or app-level error to render in the form.
+func (m *FormModel) SetError(msg string) { m.errMsg = msg }
+
+func (m *FormModel) setFocus(f formField) {
 	m.focus = f
 	m.topic.Blur()
 	m.context.Blur()
@@ -138,7 +141,7 @@ func (m *formModel) setFocus(f formField) {
 	}
 }
 
-func (m formModel) submit() (formModel, tea.Cmd) {
+func (m FormModel) submit() (FormModel, tea.Cmd) {
 	topic := strings.TrimSpace(m.topic.Value())
 	if topic == "" {
 		m.errMsg = "topic is required"
@@ -153,9 +156,9 @@ func (m formModel) submit() (formModel, tea.Cmd) {
 	}
 	modelSource := strings.TrimSpace(m.model.Value())
 
-	msg := startDebateMsg{
-		topic: topic, context: m.context.Value(), mode: m.mode, tone: m.tone,
-		rounds: rounds, model: modelSource,
+	msg := StartDebateMsg{
+		Topic: topic, Context: m.context.Value(), Mode: m.mode, Tone: m.tone,
+		Rounds: rounds, Model: modelSource,
 	}
 	m.errMsg = ""
 	return m, func() tea.Msg { return msg }
@@ -177,7 +180,7 @@ func nextTone(t prompts.Tone) prompts.Tone {
 	return prompts.DefaultTone
 }
 
-func (m formModel) View() string {
+func (m FormModel) View() string {
 	var b strings.Builder
 	b.WriteString("Start a new debate\n\n")
 
