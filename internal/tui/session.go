@@ -13,7 +13,7 @@ import (
 )
 
 // sessionView is a rendering-neutral snapshot of a debate: it comes either
-// from a live liveDebate or a loaded archive.Session, so the screen only
+// from a live LiveDebate or a loaded archive.Session, so the screen only
 // needs one render path.
 type sessionView struct {
 	sessionID string
@@ -54,9 +54,9 @@ func fromArchivedSession(sess archive.Session) sessionView {
 	}
 }
 
-// sessionModel renders the exclusive full-screen session view: a header,
+// SessionModel renders the exclusive full-screen session view: a header,
 // a scrolling transcript, and an abort confirmation prompt.
-type sessionModel struct {
+type SessionModel struct {
 	width, height int
 	viewport      viewport.Model
 	view          sessionView
@@ -66,12 +66,12 @@ type sessionModel struct {
 	mdRendererWidth int
 }
 
-func newSessionModel() sessionModel {
+func NewSessionModel() SessionModel {
 	vp := viewport.New(80, 20)
-	return sessionModel{viewport: vp}
+	return SessionModel{viewport: vp}
 }
 
-func (m *sessionModel) setSize(w, h int) {
+func (m *SessionModel) SetSize(w, h int) {
 	m.width, m.height = w, h
 	headerHeight := 2
 	m.viewport.Width = w
@@ -81,29 +81,29 @@ func (m *sessionModel) setSize(w, h int) {
 	m.refreshViewportContent()
 }
 
-func (m *sessionModel) sessionID() string { return m.view.sessionID }
+func (m *SessionModel) SessionID() string { return m.view.sessionID }
 
-func (m *sessionModel) showLive(ld *liveDebate) {
+func (m *SessionModel) ShowLive(ld *LiveDebate) {
 	m.view = fromLiveSnapshot(ld.snapshot())
 	m.confirmAbort = false
 	m.refreshViewportContent()
 	m.viewport.GotoBottom()
 }
 
-func (m *sessionModel) refreshLive(ld *liveDebate) {
+func (m *SessionModel) RefreshLive(ld *LiveDebate) {
 	m.view = fromLiveSnapshot(ld.snapshot())
 	m.refreshViewportContent()
 	m.viewport.GotoBottom()
 }
 
-func (m *sessionModel) showArchived(sess archive.Session) {
+func (m *SessionModel) ShowArchived(sess archive.Session) {
 	m.view = fromArchivedSession(sess)
 	m.confirmAbort = false
 	m.refreshViewportContent()
 	m.viewport.GotoTop()
 }
 
-func (m *sessionModel) refreshViewportContent() {
+func (m *SessionModel) refreshViewportContent() {
 	m.viewport.SetContent(m.renderTranscript())
 }
 
@@ -112,7 +112,7 @@ func (m *sessionModel) refreshViewportContent() {
 // recreated only when the width changes, since constructing one is
 // expensive (it parses a style sheet) and this runs on every live-update
 // poll during a debate.
-func (m *sessionModel) renderTranscript() string {
+func (m *SessionModel) renderTranscript() string {
 	width := m.viewport.Width
 	if width <= 0 {
 		width = 80
@@ -148,42 +148,45 @@ func glamourStyleOption() glamour.TermRendererOption {
 	return glamour.WithStandardStyle("dark")
 }
 
-func (m *sessionModel) update(msg tea.KeyMsg, a *App) (tea.Model, tea.Cmd) {
+// Update handles a keypress. live is the currently running debate, if any,
+// and is only used to honor the abort confirmation. Leaving the screen is
+// requested via SwitchScreenMsg.
+func (m SessionModel) Update(msg tea.KeyMsg, live *LiveDebate) (SessionModel, tea.Cmd) {
 	if m.confirmAbort {
 		switch msg.String() {
 		case "y":
 			m.confirmAbort = false
-			if a.live != nil {
-				a.live.debate.Abort("aborted by user")
+			if live != nil {
+				live.Abort("aborted by user")
 			}
-			return a, nil
+			return m, nil
 		default:
 			m.confirmAbort = false
-			return a, nil
+			return m, nil
 		}
 	}
 
 	switch msg.String() {
 	case "esc":
-		return a, func() tea.Msg { return switchScreenMsg{screen: screenMenu} }
+		return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenMenu} }
 	case "a":
 		if m.view.live && !m.view.done {
 			m.confirmAbort = true
 		}
-		return a, nil
+		return m, nil
 	case "j", "down":
 		m.viewport.ScrollDown(1)
-		return a, nil
+		return m, nil
 	case "k", "up":
 		m.viewport.ScrollUp(1)
-		return a, nil
+		return m, nil
 	}
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
-	return a, cmd
+	return m, cmd
 }
 
-func (m *sessionModel) View() string {
+func (m *SessionModel) View() string {
 	var b strings.Builder
 	b.WriteString(headerLine(m.view, m.width))
 	b.WriteString("\n")
