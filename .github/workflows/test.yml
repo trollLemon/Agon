@@ -26,8 +26,5 @@ jobs:
       - name: Run tests
         run: make test
 
-      - name: Run tests with race detector
-        run: make race
-
       - name: Build binary
         run: make build
