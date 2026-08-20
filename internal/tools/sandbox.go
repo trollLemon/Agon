@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
 )
 
 // ignoredDirs are skipped while walking a sandbox tree.
@@ -50,6 +52,8 @@ var (
 
 	// ErrInvalidPattern is returned by Grep when the pattern is not a valid regexp.
 	ErrInvalidPattern = errors.New("invalid grep pattern")
+
+	ErrHTML2MD = errors.New("not convertable HTML")
 
 	// errStopWalk unwinds filepath.WalkDir once maxGrepMatches is reached.
 	errStopWalk = errors.New("stop walking")
@@ -379,7 +383,7 @@ func (s *Sandbox) grepFile(re *regexp.Regexp, path string, matches *[]Match) err
 
 // http_get sends a GET request to the provided link, returning the webpage content as a string,
 // or an error.
-// TODO(trolllemon): is returning as a single string optimal here?
+// The returned string is a markdown render of the HTML, to avoid excessive token usage due to inline event handlers, javascript, and css.
 func (s *Sandbox) http_get(link string) (string, error) {
 	resolved, err := s.resolve(link)
 	if err != nil {
@@ -405,7 +409,15 @@ func (s *Sandbox) http_get(link string) (string, error) {
 		return "", fmt.Errorf("failed to read body: %w", err)
 	}
 
-	return string(bodyBytes), nil
+	htmlContent := string(bodyBytes)
+
+	markdown, err := htmltomarkdown.ConvertString(htmlContent)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to convert body to markdown: %w", err)
+	}
+
+	return markdown, nil
 }
 
 // HTTPGet sends a GET request to the provided link, returning the webpage content as a string,
