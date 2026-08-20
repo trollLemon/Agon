@@ -55,8 +55,9 @@ var (
 	errStopWalk = errors.New("stop walking")
 )
 
-// urlRegex matches against URLs.
-var urlRegex = regexp.MustCompile(`^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(:\d+)?(/.*)?$`)
+// urlRegex matches http(s) URLs, including hosts that are domain names,
+// bare IP addresses, or localhost, each with an optional port and path.
+var urlRegex = regexp.MustCompile(`^https?://[a-zA-Z0-9.-]+(:\d+)?(/.*)?$`)
 
 // roots returns every top-level sandbox path: directories first (most
 // specific first), then explicitly allowed files.

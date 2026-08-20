@@ -85,14 +85,16 @@ func Specs() []Spec {
 func Call(sb *Sandbox, name string, args map[string]any) (string, error) {
 	switch name {
 	case "read_file":
-		return sb.ReadFile(args["path"].(string))
+		path, _ := args["path"].(string)
+		return sb.ReadFile(path)
 
 	case "grep":
-		pattern := args["pattern"].(string)
+		pattern, _ := args["pattern"].(string)
 		if pattern == "" {
 			return "", fmt.Errorf("grep requires a pattern")
 		}
-		matches, err := sb.Grep(pattern, args["path"].(string))
+		path, _ := args["path"].(string)
+		matches, err := sb.Grep(pattern, path)
 		if err != nil {
 			return "", err
 		}
@@ -106,7 +108,8 @@ func Call(sb *Sandbox, name string, args map[string]any) (string, error) {
 		return out, nil
 
 	case "list_dir":
-		names, err := sb.ListDir(args["path"].(string))
+		path, _ := args["path"].(string)
+		names, err := sb.ListDir(path)
 		if err != nil {
 			return "", err
 		}
@@ -117,7 +120,7 @@ func Call(sb *Sandbox, name string, args map[string]any) (string, error) {
 		return out, nil
 
 	case "http_get":
-		link := args["link"].(string)
+		link, _ := args["link"].(string)
 		if link == "" {
 			return "", fmt.Errorf("http_get requires a link")
 		}

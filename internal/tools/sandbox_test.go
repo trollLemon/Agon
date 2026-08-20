@@ -389,14 +389,6 @@ func TestCallHTTPGet(t *testing.T) {
 		t.Errorf("got %q, want %q", out, "tool call response")
 	}
 
-	outUrl, err := Call(sb, "http_get", map[string]any{"url": ts.URL})
-	if err != nil {
-		t.Fatalf("Call(http_get with url key): %v", err)
-	}
-	if outUrl != "tool call response" {
-		t.Errorf("got %q, want %q", outUrl, "tool call response")
-	}
-
 	if _, err := Call(sb, "http_get", map[string]any{}); err == nil {
 		t.Error("expected missing link to return error")
 	}

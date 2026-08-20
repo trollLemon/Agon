@@ -22,7 +22,7 @@ run: ## Run the TUI in the foreground (Ctrl-C to quit)
 
 .PHONY: test
 test: ## Run all tests with the race detector, serialized (recommended for -race)
-	@go test -race -p 1 ./...
+	@go test -race -p 1 -v ./...
 
 .PHONY: vet
 vet: ## Run go vet
