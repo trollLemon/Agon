@@ -21,11 +21,7 @@ run: ## Run the TUI in the foreground (Ctrl-C to quit)
 	@go run $(PKG)
 
 .PHONY: test
-test: ## Run all unit + BDD tests (no model, no TTY needed)
-	@go test ./...
-
-.PHONY: race
-race: ## Run all tests with the race detector, serialized (recommended for -race)
+test: ## Run all tests with the race detector, serialized (recommended for -race)
 	@go test -race -p 1 ./...
 
 .PHONY: vet
