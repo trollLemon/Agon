@@ -52,6 +52,9 @@ var (
 	errStopWalk = errors.New("stop walking")
 )
 
+// urlRegex matches against URLs.
+var urlRegex = regexp.MustCompile(`^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(:\d+)?(/.*)?$`)
+
 // roots returns every top-level sandbox path: directories first (most
 // specific first), then explicitly allowed files.
 func deriveRoots(dirs []string, files []string) []string {
@@ -93,6 +96,7 @@ func ParsePathList(text string) []string {
 type Sandbox struct {
 	dirs  []string // absolute, most specific (longest) first
 	files []string // absolute individual files, sorted
+	links []string // links for webpages the agent can view.
 	roots []string // roots for every top level path
 }
 
@@ -104,8 +108,14 @@ func NewSandbox(paths []string) (*Sandbox, error) {
 	if len(paths) == 0 {
 		return nil, ErrNoDirs
 	}
-	var dirs, files []string
+	var dirs, files, links []string
 	for _, p := range paths {
+
+		if urlRegex.MatchString(p) {
+			links = append(links, p)
+			continue
+		}
+
 		a, err := filepath.Abs(p)
 		if err != nil {
 			return nil, fmt.Errorf("resolve sandbox path %q: %w", p, err)
@@ -138,6 +148,9 @@ func (s *Sandbox) Dirs() []string { return s.dirs }
 // Files returns the sandbox's explicitly allowed absolute file paths.
 func (s *Sandbox) Files() []string { return s.files }
 
+// Files returns the sandbox's explicitly allowed absolute file paths.
+func (s *Sandbox) Links() []string { return s.links }
+
 // resolve maps a caller-supplied path to an absolute path inside the
 // sandbox. An absolute path is accepted only if it stays within one of the
 // sandbox dirs (checked lexically via filepath.Rel + filepath.IsLocal).
@@ -145,6 +158,13 @@ func (s *Sandbox) Files() []string { return s.files }
 // dir, most specific first, resolving to the first that exists.
 // A bare "." is only meaningful with a single directory.
 func (s *Sandbox) resolve(p string) (string, error) {
+	if urlRegex.MatchString(p) {
+		if slices.Contains(s.links, p) {
+			return p, nil
+		}
+		return "", fmt.Errorf("link %q: %w", p, ErrOutsideSandbox)
+	}
+
 	if p == "" {
 		p = "."
 	}

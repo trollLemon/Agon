@@ -127,9 +127,10 @@ If you catch yourself writing a label like the ones above, stop — delete it an
 
 // ToolsPrompt describes the read-only tool sandbox available to debaters.
 const ToolsPrompt = `You have read-only tools (read_file, grep, list_dir) scoped to the
-	sandbox files and directories listed below. Use them to ground your argument in what
-	is actually there: only cite a file after reading it, and never invent paths, symbols,
-	or line numbers. Do not attempt to read anything outside the listed sandbox paths.`
+	sandbox files and directories listed below. You also have a tool to view web pages (http_get).
+	Use them to ground your argument in what is actually there: only cite a file or webpage after reading it, 
+	and never invent paths, symbols, line numbers, or information. 
+	Do not attempt to read anything outside the listed sandbox paths.`
 
 // SandboxDirsIntro precedes the bulleted list of sandbox directories.
 const SandboxDirsIntro = `Sandbox directories (tool paths may be absolute within these, 
@@ -137,6 +138,9 @@ const SandboxDirsIntro = `Sandbox directories (tool paths may be absolute within
 
 // SandboxFilesIntro precedes the bulleted list of individually allowed files.
 const SandboxFilesIntro = `Sandbox files (read these with their absolute path shown below):`
+
+// SandboxLinksIntro precedes the bulleted list of individually allowed links.
+const SandboxLinksIntro = `Sandbox links (read the webpage content returned from the tool call)`
 
 // Per-turn reminders appended to user messages. They intentionally avoid
 // "Round N of M"-style bracketed framing as smaller models seems to thing they need to
@@ -187,6 +191,7 @@ type DebaterParams struct {
 	Rounds        int
 	Dirs          []string // sandbox directories tools are confined to
 	Files         []string // individually allowed sandbox files
+	Links         []string // allowed links to web pages
 }
 
 // DebaterSystem renders the persistent system persona for one debater depending on the
@@ -240,6 +245,15 @@ func DebaterSystem(p DebaterParams) string {
 			out += "\n  - " + f
 		}
 	}
+
+	if len(p.Links) > 0 {
+		out += "\n" + SandboxLinksIntro
+		for _, f := range p.Links {
+			out += "\n  - " + f
+		}
+
+	}
+
 	return out
 }
 
