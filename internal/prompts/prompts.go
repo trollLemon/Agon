@@ -118,7 +118,8 @@ const (
 )
 
 // TurnRulesPrompt is the shared "write one plain-prose turn" rulebook.
-const TurnRulesPrompt = `This is a live, turn-by-turn exchange: you are called back separately for every turn you take, and you only ever see the transcript so far — never the whole debate in advance, and never your opponent's future replies. Write ONLY your single next turn, as plain continuous prose (a few tight paragraphs). Do not, under any circumstances:
+const TurnRulesPrompt = `This is a live, turn-by-turn exchange: you are called back separately for every turn you take, and you only ever see the transcript so far — never the whole debate in advance, and never your opponent's future replies. Write ONLY your single next turn, as plain continuous prose (try to keep within a few 
+	paragraphs ). Do not, under any circumstances:
   - invent, number, preview, or summarize other turns/rounds (no "Round 1:", "Round 2:", "Final round:", "Final answer:", or similar labels/headers)
   - write your opponent's reply, or narrate what they will say
   - use markdown section headers (#, ##) to structure your reply into stages
@@ -126,7 +127,10 @@ If you catch yourself writing a label like the ones above, stop — delete it an
 
 // ToolsPrompt describes the read-only tool sandbox available to debaters.
 const ToolsPrompt = `You have read-only tools (read_file, grep, list_dir) scoped to 
-	"the directories under debate.`
+	"the directories under debate.
+	If the starting context has not listed any paths on the system, or there were no detected paths, do not 
+	run a tool call to read from anything. Only use the read_file, list_dir, and grep tools when certain the user gave a path to analyze. 
+	`
 
 // SandboxDirsIntro precedes the bulleted list of sandbox directories.
 const SandboxDirsIntro = `Sandbox directories (tool paths may be absolute within these, 
