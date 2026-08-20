@@ -14,7 +14,7 @@ type Spec struct {
 }
 
 // Specs returns the tool set exposed to debaters when a repo is in scope:
-// read_file, grep, and list_dir.
+// read_file, grep, list_dir, and http_get.
 func Specs() []Spec {
 	return []Spec{
 		{
@@ -63,27 +63,36 @@ func Specs() []Spec {
 				"required": []string{},
 			},
 		},
+		{
+			Name:        "http_get",
+			Description: "Fetch the content of an allowed web page at the specified link.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"link": map[string]any{
+						"type":        "string",
+						"description": "URL of the webpage to fetch.",
+					},
+				},
+				"required": []string{"link"},
+			},
+		},
 	}
 }
 
 // Call dispatches one tool invocation by name against the sandbox, returning
 // the result text a model should see next.
 func Call(sb *Sandbox, name string, args map[string]any) (string, error) {
-	str := func(key string) string {
-		s, _ := args[key].(string)
-		return s
-	}
-
 	switch name {
 	case "read_file":
-		return sb.ReadFile(str("path"))
+		return sb.ReadFile(args["path"].(string))
 
 	case "grep":
-		pattern := str("pattern")
+		pattern := args["pattern"].(string)
 		if pattern == "" {
 			return "", fmt.Errorf("grep requires a pattern")
 		}
-		matches, err := sb.Grep(pattern, str("path"))
+		matches, err := sb.Grep(pattern, args["path"].(string))
 		if err != nil {
 			return "", err
 		}
@@ -97,7 +106,7 @@ func Call(sb *Sandbox, name string, args map[string]any) (string, error) {
 		return out, nil
 
 	case "list_dir":
-		names, err := sb.ListDir(str("path"))
+		names, err := sb.ListDir(args["path"].(string))
 		if err != nil {
 			return "", err
 		}
@@ -106,6 +115,13 @@ func Call(sb *Sandbox, name string, args map[string]any) (string, error) {
 			out += n + "\n"
 		}
 		return out, nil
+
+	case "http_get":
+		link := args["link"].(string)
+		if link == "" {
+			return "", fmt.Errorf("http_get requires a link")
+		}
+		return sb.http_get(link)
 
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
