@@ -13,12 +13,13 @@ import (
 )
 
 // formField identifies one focusable element of the new-debate form
-// (topic, starting context, mode, tone, rounds, model).
+// (topic, starting context, sandbox, mode, tone, rounds, model).
 type formField int
 
 const (
 	fieldTopic formField = iota
 	fieldContext
+	fieldSandbox
 	fieldMode
 	fieldTone
 	fieldRounds
@@ -31,6 +32,7 @@ type FormModel struct {
 	focus   formField
 	topic   textinput.Model
 	context textarea.Model
+	sandbox textarea.Model
 	mode    prompts.Mode
 	tone    prompts.Tone
 	rounds  textinput.Model
@@ -44,8 +46,12 @@ func NewFormModel(defaultModel string) FormModel {
 	topic.Focus()
 
 	ctx := textarea.New()
-	ctx.Placeholder = "Starting context: constraints, links, a repo path to ground the debate in real code…"
+	ctx.Placeholder = "Starting context: constraints, links, notes to frame the debate…"
 	ctx.SetHeight(4)
+
+	sandbox := textarea.New()
+	sandbox.Placeholder = "One file path per line — the read-only files debaters may inspect…"
+	sandbox.SetHeight(3)
 
 	rounds := textinput.New()
 	rounds.Placeholder = strconv.Itoa(prompts.DefaultRounds)
@@ -59,6 +65,7 @@ func NewFormModel(defaultModel string) FormModel {
 		focus:   fieldTopic,
 		topic:   topic,
 		context: ctx,
+		sandbox: sandbox,
 		mode:    prompts.DefaultMode,
 		tone:    prompts.DefaultTone,
 		rounds:  rounds,
@@ -105,6 +112,8 @@ func (m FormModel) Update(msg tea.KeyMsg) (FormModel, tea.Cmd) {
 		m.topic, cmd = m.topic.Update(msg)
 	case fieldContext:
 		m.context, cmd = m.context.Update(msg)
+	case fieldSandbox:
+		m.sandbox, cmd = m.sandbox.Update(msg)
 	case fieldRounds:
 		if msg.String() == "enter" {
 			m.setFocus(fieldModel)
@@ -127,6 +136,7 @@ func (m *FormModel) setFocus(f formField) {
 	m.focus = f
 	m.topic.Blur()
 	m.context.Blur()
+	m.sandbox.Blur()
 	m.rounds.Blur()
 	m.model.Blur()
 	switch f {
@@ -134,6 +144,8 @@ func (m *FormModel) setFocus(f formField) {
 		m.topic.Focus()
 	case fieldContext:
 		m.context.Focus()
+	case fieldSandbox:
+		m.sandbox.Focus()
 	case fieldRounds:
 		m.rounds.Focus()
 	case fieldModel:
@@ -157,8 +169,8 @@ func (m FormModel) submit() (FormModel, tea.Cmd) {
 	modelSource := strings.TrimSpace(m.model.Value())
 
 	msg := StartDebateMsg{
-		Topic: topic, Context: m.context.Value(), Mode: m.mode, Tone: m.tone,
-		Rounds: rounds, Model: modelSource,
+		Topic: topic, Context: m.context.Value(), Sandbox: m.sandbox.Value(),
+		Mode: m.mode, Tone: m.tone, Rounds: rounds, Model: modelSource,
 	}
 	m.errMsg = ""
 	return m, func() tea.Msg { return msg }
@@ -186,6 +198,7 @@ func (m FormModel) View() string {
 
 	fmt.Fprintf(&b, "%s Topic:\n%s\n\n", focusMark(m.focus == fieldTopic), m.topic.View())
 	fmt.Fprintf(&b, "%s Starting context:\n%s\n\n", focusMark(m.focus == fieldContext), m.context.View())
+	fmt.Fprintf(&b, "%s Sandbox (files debaters can read):\n%s\n\n", focusMark(m.focus == fieldSandbox), m.sandbox.View())
 	fmt.Fprintf(&b, "%s Mode: %s  (←/→ to change)\n\n", focusMark(m.focus == fieldMode), m.mode)
 	fmt.Fprintf(&b, "%s Tone: %s  (←/→ to change)\n\n", focusMark(m.focus == fieldTone), m.tone)
 	fmt.Fprintf(&b, "%s Rounds:\n%s\n\n", focusMark(m.focus == fieldRounds), m.rounds.View())

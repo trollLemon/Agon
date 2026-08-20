@@ -166,8 +166,8 @@ func (w *world) iFillInTheTopic(topic string) {
 }
 
 func (w *world) iSubmitTheForm() {
-	for range 5 {
-		w.tm.Send(key("tab")) // topic -> context -> mode -> tone -> rounds -> model
+	for range 6 {
+		w.tm.Send(key("tab")) // topic -> context -> sandbox -> mode -> tone -> rounds -> model
 	}
 	w.tm.Send(key("enter")) // submit from the model field
 }

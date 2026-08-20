@@ -46,6 +46,7 @@ type Session struct {
 	Sides     []Side            `json:"sides"`
 	Model     string            `json:"model"`
 	Dirs      []string          `json:"dirs,omitempty"`
+	Files     []string          `json:"files,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
 	Messages  []Message         `json:"messages"`
 	Verdict   string            `json:"verdict,omitempty"`

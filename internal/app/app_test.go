@@ -45,8 +45,8 @@ func TestNewDebateEndToEnd(t *testing.T) {
 	waitForText(t, tm, "Topic:")
 
 	tm.Type("Should we ship it")
-	for range 5 {
-		tm.Send(key("tab")) // topic -> context -> mode -> tone -> rounds -> model
+	for range 6 {
+		tm.Send(key("tab")) // topic -> context -> sandbox -> mode -> tone -> rounds -> model
 	}
 	tm.Send(key("enter")) // submit from the model field
 
@@ -119,7 +119,7 @@ func TestAbortDiscardsLiveDebate(t *testing.T) {
 	waitForText(t, tm, "Topic:")
 
 	tm.Type("Should we ship it")
-	for range 5 {
+	for range 6 {
 		tm.Send(key("tab"))
 	}
 	tm.Send(key("enter")) // submit
@@ -159,7 +159,7 @@ func TestBootstrapLogVisibleWhileLoading(t *testing.T) {
 	waitForText(t, tm, "Topic:")
 
 	tm.Type("Should we ship it")
-	for range 5 {
+	for range 6 {
 		tm.Send(key("tab"))
 	}
 	tm.Send(key("enter")) // submit; kicks off the slow, logging bootstrap

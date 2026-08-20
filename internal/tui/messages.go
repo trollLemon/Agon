@@ -24,6 +24,7 @@ type SwitchScreenMsg struct{ Screen Screen }
 type StartDebateMsg struct {
 	Topic   string
 	Context string
+	Sandbox string
 	Mode    prompts.Mode
 	Tone    prompts.Tone
 	Rounds  int

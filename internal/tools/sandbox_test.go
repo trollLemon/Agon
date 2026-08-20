@@ -7,55 +7,91 @@ import (
 	"testing"
 )
 
-func TestDetectPaths(t *testing.T) {
-	dir := t.TempDir()
-	sub := filepath.Join(dir, "sub")
-	if err := os.Mkdir(sub, 0o755); err != nil {
+func TestParsePathList(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	text := "  /a/b  \n\n\"/c/d\"\n/a/b\n~/notes.txt\n"
+	got := ParsePathList(text)
+	want := []string{"/a/b", "/c/d", filepath.Join(home, "notes.txt")}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("entry %d: got %q, want %q", i, got[i], want[i])
+		}
+	}
+	if len(ParsePathList("   \n\t\n")) != 0 {
+		t.Error("expected blank input to yield no paths")
+	}
+}
+
+func TestNewSandboxPathsClassifiesFilesAndDirs(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "notes.md")
+	if err := os.WriteFile(file, []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	t.Run("directory found", func(t *testing.T) {
-		text := "please refactor the auth layer in " + dir + " and add tests"
-		got, err := DetectPaths(text)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(got) != 1 || got[0] != dir {
-			t.Errorf("got %v, want [%s]", got, dir)
-		}
-	})
+	sb, err := NewSandboxPaths([]string{root, file})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sb.Dirs(); len(got) != 1 || got[0] != root {
+		t.Errorf("Dirs: got %v, want [%s]", got, root)
+	}
+	if got := sb.Files(); len(got) != 1 || got[0] != file {
+		t.Errorf("Files: got %v, want [%s]", got, file)
+	}
 
-	t.Run("duplicates collapsed", func(t *testing.T) {
-		text := "look at " + dir + " and also " + dir
-		got, err := DetectPaths(text)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(got) != 1 {
-			t.Errorf("got %v, want one entry", got)
-		}
-	})
+	if _, err := NewSandboxPaths(nil); !errors.Is(err, ErrNoDirs) {
+		t.Errorf("NewSandboxPaths(nil): got %v, want ErrNoDirs", err)
+	}
+	if _, err := NewSandboxPaths([]string{filepath.Join(root, "missing")}); err == nil {
+		t.Error("expected error for a nonexistent path")
+	}
+}
 
-	t.Run("garbage text finds nothing", func(t *testing.T) {
-		got, _ := DetectPaths("should we adopt event sourcing for the orders service?")
-		if len(got) != 0 {
-			t.Errorf("expected no directories, got %v", got)
-		}
-	})
+func TestFileSandboxToolAccess(t *testing.T) {
+	root := t.TempDir()
+	allowed := filepath.Join(root, "allowed.go")
+	other := filepath.Join(root, "other.go")
+	if err := os.WriteFile(allowed, []byte("package a\nfunc Do() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(other, []byte("package a\nfunc Secret() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
-	t.Run("nonexistent path finds nothing", func(t *testing.T) {
-		got, _ := DetectPaths("look at /this/path/does/not/exist-xyz for context")
-		if len(got) != 0 {
-			t.Errorf("expected no directories, got %v", got)
-		}
-	})
+	sb, err := NewSandboxPaths([]string{allowed})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	t.Run("url is not mistaken for a path", func(t *testing.T) {
-		got, _ := DetectPaths("see https://example.com/some/path for docs")
-		if len(got) != 0 {
-			t.Errorf("expected URLs to be ignored, got %v", got)
-		}
-	})
+	if got, err := sb.ReadFile(allowed); err != nil || got != "package a\nfunc Do() {}\n" {
+		t.Errorf("ReadFile(allowed): got (%q, %v)", got, err)
+	}
+	if got, err := sb.ReadFile("allowed.go"); err != nil || got != "package a\nfunc Do() {}\n" {
+		t.Errorf("ReadFile(basename): got (%q, %v)", got, err)
+	}
+	if _, err := sb.ReadFile(other); !errors.Is(err, ErrOutsideSandbox) {
+		t.Errorf("ReadFile(other): got %v, want ErrOutsideSandbox", err)
+	}
+
+	matches, err := sb.Grep(`func \w+\(`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].Line != 2 {
+		t.Errorf("Grep across files: got %+v, want one hit on line 2 of the allowed file", matches)
+	}
+
+	entries, err := sb.ListDir("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0] != allowed {
+		t.Errorf("ListDir default: got %v, want [%s]", entries, allowed)
+	}
 }
 
 func TestNewSandboxValidatesDirs(t *testing.T) {

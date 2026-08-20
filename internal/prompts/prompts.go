@@ -126,15 +126,17 @@ const TurnRulesPrompt = `This is a live, turn-by-turn exchange: you are called b
 If you catch yourself writing a label like the ones above, stop — delete it and just continue the argument in plain prose instead.`
 
 // ToolsPrompt describes the read-only tool sandbox available to debaters.
-const ToolsPrompt = `You have read-only tools (read_file, grep, list_dir) scoped to 
-	"the directories under debate.
-	If the starting context has not listed any paths on the system, or there were no detected paths, do not 
-	run a tool call to read from anything. Only use the read_file, list_dir, and grep tools when certain the user gave a path to analyze. 
-	`
+const ToolsPrompt = `You have read-only tools (read_file, grep, list_dir) scoped to the
+	sandbox files and directories listed below. Use them to ground your argument in what
+	is actually there: only cite a file after reading it, and never invent paths, symbols,
+	or line numbers. Do not attempt to read anything outside the listed sandbox paths.`
 
 // SandboxDirsIntro precedes the bulleted list of sandbox directories.
 const SandboxDirsIntro = `Sandbox directories (tool paths may be absolute within these, 
 	"or relative to them):`
+
+// SandboxFilesIntro precedes the bulleted list of individually allowed files.
+const SandboxFilesIntro = `Sandbox files (read these with their absolute path shown below):`
 
 // Per-turn reminders appended to user messages. They intentionally avoid
 // "Round N of M"-style bracketed framing as smaller models seems to thing they need to
@@ -184,6 +186,7 @@ type DebaterParams struct {
 	Leads         bool // true for the side that moves first each round
 	Rounds        int
 	Dirs          []string // sandbox directories tools are confined to
+	Files         []string // individually allowed sandbox files
 }
 
 // DebaterSystem renders the persistent system persona for one debater depending on the
@@ -220,13 +223,21 @@ func DebaterSystem(p DebaterParams) string {
 		order,
 		TurnRulesPrompt,
 		toneGuidance(p.Tone),
-		ToolsPrompt,
 	}, "\n\n")
 
+	if len(p.Dirs) > 0 || len(p.Files) > 0 {
+		out += "\n\n" + ToolsPrompt
+	}
 	if len(p.Dirs) > 0 {
 		out += "\n" + SandboxDirsIntro
 		for _, d := range p.Dirs {
 			out += "\n  - " + d
+		}
+	}
+	if len(p.Files) > 0 {
+		out += "\n" + SandboxFilesIntro
+		for _, f := range p.Files {
+			out += "\n  - " + f
 		}
 	}
 	return out

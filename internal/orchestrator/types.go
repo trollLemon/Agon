@@ -84,7 +84,9 @@ type Config struct {
 	Model string
 	// SandboxDirs are the directories tool grounding is confined to.
 	SandboxDirs []string // nil disables tool grounding
-	CreatedAt   time.Time
+	// SandboxFiles are individually allowed files tool grounding may read.
+	SandboxFiles []string
+	CreatedAt    time.Time
 }
 
 // EventKind identifies the shape of an Event.

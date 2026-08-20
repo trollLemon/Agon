@@ -52,38 +52,38 @@ var (
 	errStopWalk = errors.New("stop walking")
 )
 
-// pathTokenRe finds path-shaped tokens in freeform text: a run of characters
-// containing at least one '/', or starting with './', '../', or '~/'.
-var pathTokenRe = regexp.MustCompile(`(?:/|\.\.?/|~/)?[\w.@+-]+(?:/[\w.@+-]+)+/?|\.\.?/[\w.@+-]+/?`)
-
-// DetectPaths scans freeform text for path segments that resolve to existing
-// directories, returning their absolute forms. It returns nil if no such path is found.
-func DetectPaths(text string) ([]string, error) {
+// ParsePathList splits a user-entered, newline-separated list of paths into
+// cleaned entries: it trims surrounding whitespace and quotes, expands a
+// leading "~/", drops blank lines, and collapses duplicates. Existence and
+// file-vs-directory classification are left to NewSandboxPaths.
+func ParsePathList(text string) []string {
 	seen := map[string]bool{}
-	var dirs []string
-	for _, tok := range pathTokenRe.FindAllString(text, -1) {
-		tok = strings.Trim(tok, `"'`+"`"+`,;:()[]{}<>`)
-		if tok == "" || strings.Contains(tok, "://") {
+	var paths []string
+	for _, line := range strings.Split(text, "\n") {
+		p := strings.TrimSpace(line)
+		p = strings.Trim(p, `"'`+"`")
+		if p == "" {
 			continue
 		}
-		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(tok, "~/") {
-			tok = filepath.Join(home, strings.TrimPrefix(tok, "~/"))
+		if strings.HasPrefix(p, "~/") {
+			if home, err := os.UserHomeDir(); err == nil {
+				p = filepath.Join(home, strings.TrimPrefix(p, "~/"))
+			}
 		}
-		abs, err := filepath.Abs(tok)
-		if err != nil {
-			continue
-		}
-		if info, err := os.Stat(abs); err == nil && info.IsDir() && !seen[abs] {
-			seen[abs] = true
-			dirs = append(dirs, abs)
+		if !seen[p] {
+			seen[p] = true
+			paths = append(paths, p)
 		}
 	}
-	return dirs, nil
+	return paths
 }
 
-// Sandbox confines read-only file operations to a set of directories.
+// Sandbox confines read-only file operations to a set of directories and/or
+// individual files. Directories ground the tools over their whole tree; files
+// grant access to exactly that file.
 type Sandbox struct {
-	dirs []string // absolute, most specific (longest) first
+	dirs  []string // absolute, most specific (longest) first
+	files []string // absolute individual files, sorted
 }
 
 // NewSandbox creates a Sandbox over dirs, each of which must already exist
@@ -113,8 +113,53 @@ func NewSandbox(dirs []string) (*Sandbox, error) {
 	return &Sandbox{dirs: abs}, nil
 }
 
+// NewSandboxPaths creates a Sandbox over a mix of existing files and
+// directories. Each path must already exist; the first missing entry fails
+// the call. Directories ground the tools over their whole tree, files grant
+// access to exactly that file.
+func NewSandboxPaths(paths []string) (*Sandbox, error) {
+	if len(paths) == 0 {
+		return nil, ErrNoDirs
+	}
+	var dirs, files []string
+	for _, p := range paths {
+		a, err := filepath.Abs(p)
+		if err != nil {
+			return nil, fmt.Errorf("resolve sandbox path %q: %w", p, err)
+		}
+		info, err := os.Stat(a)
+		if err != nil {
+			return nil, fmt.Errorf("sandbox path %q: %w", p, err)
+		}
+		if info.IsDir() {
+			if !slices.Contains(dirs, a) {
+				dirs = append(dirs, a)
+			}
+			continue
+		}
+		if !slices.Contains(files, a) {
+			files = append(files, a)
+		}
+	}
+	sort.Slice(dirs, func(i, j int) bool { return len(dirs[i]) > len(dirs[j]) })
+	sort.Strings(files)
+	return &Sandbox{dirs: dirs, files: files}, nil
+}
+
 // Dirs returns the sandbox's absolute directories, most specific first.
 func (s *Sandbox) Dirs() []string { return slices.Clone(s.dirs) }
+
+// Files returns the sandbox's explicitly allowed absolute file paths.
+func (s *Sandbox) Files() []string { return slices.Clone(s.files) }
+
+// roots returns every top-level sandbox path: directories first (most
+// specific first), then explicitly allowed files.
+func (s *Sandbox) roots() []string {
+	roots := make([]string, 0, len(s.dirs)+len(s.files))
+	roots = append(roots, s.dirs...)
+	roots = append(roots, s.files...)
+	return roots
+}
 
 // resolve maps a caller-supplied path to an absolute path inside the
 // sandbox. An absolute path is accepted only if it stays within one of the
@@ -127,8 +172,9 @@ func (s *Sandbox) resolve(p string) (string, error) {
 		p = "."
 	}
 	if p == "." {
-		if len(s.dirs) == 1 {
-			return s.dirs[0], nil
+		roots := s.roots()
+		if len(roots) == 1 {
+			return roots[0], nil
 		}
 		return "", fmt.Errorf("path %q: %w", p, ErrAmbiguousPath)
 	}
@@ -137,6 +183,11 @@ func (s *Sandbox) resolve(p string) (string, error) {
 		full := filepath.Clean(p)
 		for _, dir := range s.dirs {
 			if rel, err := filepath.Rel(dir, full); err == nil && filepath.IsLocal(rel) {
+				return full, nil
+			}
+		}
+		for _, f := range s.files {
+			if full == f {
 				return full, nil
 			}
 		}
@@ -149,6 +200,11 @@ func (s *Sandbox) resolve(p string) (string, error) {
 	for _, dir := range s.dirs {
 		if full := filepath.Join(dir, p); statExists(full) {
 			return full, nil
+		}
+	}
+	for _, f := range s.files {
+		if filepath.Base(f) == p {
+			return f, nil
 		}
 	}
 	return "", fmt.Errorf("path %q: %w", p, ErrNotFound)
@@ -174,8 +230,12 @@ func (s *Sandbox) ReadFile(p string) (string, error) {
 }
 
 // ListDir lists the entries of the directory at p, directories suffixed
-// with "/".
+// with "/". With a default path ("" or "."), a sandbox that holds explicitly
+// allowed files lists its top-level roots instead of a single directory.
 func (s *Sandbox) ListDir(p string) ([]string, error) {
+	if (p == "" || p == ".") && len(s.files) > 0 {
+		return s.rootListing(), nil
+	}
 	full, err := s.resolve(p)
 	if err != nil {
 		return nil, err
@@ -199,6 +259,19 @@ func (s *Sandbox) ListDir(p string) ([]string, error) {
 	return names, nil
 }
 
+// rootListing renders the sandbox's top-level roots for a default list_dir:
+// directories (suffixed with "/") and explicitly allowed files, each as its
+// absolute path, in deterministic order.
+func (s *Sandbox) rootListing() []string {
+	names := make([]string, 0, len(s.dirs)+len(s.files))
+	for _, d := range s.dirs {
+		names = append(names, d+"/")
+	}
+	names = append(names, s.files...)
+	sort.Strings(names)
+	return names
+}
+
 // Match is a single grep hit.
 type Match struct {
 	Path string
@@ -217,62 +290,89 @@ func (s *Sandbox) relToSandbox(path string) string {
 }
 
 // Grep searches files under p for lines matching pattern (a Go regexp),
-// returning up to maxGrepMatches hits in deterministic path/line order.
+// returning up to maxGrepMatches hits in deterministic path/line order. With
+// a default path ("" or "."), every sandbox root is searched: each directory
+// tree and each explicitly allowed file.
 func (s *Sandbox) Grep(pattern, p string) ([]Match, error) {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidPattern, err)
 	}
-	root, err := s.resolve(p)
-	if err != nil {
-		return nil, err
+
+	var roots []string
+	if p == "" || p == "." {
+		roots = s.roots()
+	} else {
+		root, err := s.resolve(p)
+		if err != nil {
+			return nil, err
+		}
+		roots = []string{root}
 	}
 
 	var matches []Match
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	for _, root := range roots {
+		if len(matches) >= maxGrepMatches {
+			break
+		}
+		info, err := os.Stat(root)
+		if err != nil {
+			continue
+		}
+		var werr error
+		if info.IsDir() {
+			werr = s.grepDir(re, root, &matches)
+		} else {
+			werr = s.grepFile(re, root, &matches)
+		}
+		if werr != nil && !errors.Is(werr, errStopWalk) {
+			return nil, werr
+		}
+	}
+	return matches, nil
+}
+
+// grepDir walks a directory tree, appending matches, skipping ignoredDirs and
+// unwinding via errStopWalk once maxGrepMatches is reached.
+func (s *Sandbox) grepDir(re *regexp.Regexp, root string, matches *[]Match) error {
+	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-
-		if len(matches) >= maxGrepMatches {
+		if len(*matches) >= maxGrepMatches {
 			return errStopWalk
 		}
-
 		if d.IsDir() {
 			if ignoredDirs[d.Name()] {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-
-		f, err := os.Open(path)
-		if err != nil {
-			return nil
-		}
-		defer f.Close()
-
-		relPath := s.relToSandbox(path)
-		lineNo := 0
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			lineNo++
-			line := scanner.Text()
-			if re.MatchString(line) {
-				matches = append(matches,
-					Match{
-						Path: relPath,
-						Line: lineNo,
-						Text: line})
-
-				if len(matches) >= maxGrepMatches {
-					return errStopWalk
-				}
-			}
-		}
-		return nil
+		return s.grepFile(re, path, matches)
 	})
-	if err != nil && !errors.Is(err, errStopWalk) {
-		return nil, err
+}
+
+// grepFile scans one file, appending matching lines. Unreadable files are
+// skipped; it returns errStopWalk once maxGrepMatches is reached.
+func (s *Sandbox) grepFile(re *regexp.Regexp, path string, matches *[]Match) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
 	}
-	return matches, nil
+	defer f.Close()
+
+	relPath := s.relToSandbox(path)
+	lineNo := 0
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		lineNo++
+		if len(*matches) >= maxGrepMatches {
+			return errStopWalk
+		}
+		line := scanner.Text()
+		if re.MatchString(line) {
+			*matches = append(*matches, Match{Path: relPath, Line: lineNo, Text: line})
+		}
+	}
+	return nil
 }

@@ -34,6 +34,7 @@ func NewBootLog() *BootLog { return &BootLog{} }
 // updates) replaces the previous line instead of appending a new one, so a
 // rapid stream of progress percentages doesn't flood the visible tail with
 // near-duplicate lines.
+// Long messages are wrapped around so that smaller windows can see the full text.
 func (b *BootLog) Append(msg string, args ...any) {
 	patch := strings.HasPrefix(msg, "\r")
 	if patch {
@@ -45,6 +46,7 @@ func (b *BootLog) Append(msg string, args ...any) {
 	for i := 0; i+1 < len(args); i += 2 {
 		fmt.Fprintf(&sb, " %v[%v]", args[i], args[i+1])
 	}
+
 	line := sb.String()
 
 	b.mu.Lock()
