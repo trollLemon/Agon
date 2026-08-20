@@ -2,6 +2,8 @@ package tools
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -280,5 +282,126 @@ func TestCallDispatch(t *testing.T) {
 
 	if _, err := Call(sb, "nonexistent_tool", nil); err == nil {
 		t.Errorf("expected unknown tool to error")
+	}
+}
+
+func TestSpecsIncludesHTTPGet(t *testing.T) {
+	specs := Specs()
+	var found bool
+	for _, s := range specs {
+		if s.Name == "http_get" {
+			found = true
+			if s.Description == "" {
+				t.Error("http_get spec missing description")
+			}
+			props, ok := s.Parameters["properties"].(map[string]any)
+			if !ok {
+				t.Fatal("http_get spec missing properties map")
+			}
+			if _, ok := props["link"]; !ok {
+				t.Error("http_get properties missing link parameter")
+			}
+			req, ok := s.Parameters["required"].([]string)
+			if !ok || len(req) != 1 || req[0] != "link" {
+				t.Errorf("http_get required: got %v, want [link]", req)
+			}
+		}
+	}
+	if !found {
+		t.Error("Specs() did not return http_get tool")
+	}
+}
+
+func TestSandboxLinks(t *testing.T) {
+	url1 := "https://example.com/page"
+	url2 := "http://example.org/api"
+
+	sb, err := NewSandbox([]string{url1, url2})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	links := sb.Links()
+	if len(links) != 2 || links[0] != url1 || links[1] != url2 {
+		t.Errorf("Links: got %v, want [%s, %s]", links, url1, url2)
+	}
+
+	resolved, err := sb.resolve(url1)
+	if err != nil || resolved != url1 {
+		t.Errorf("resolve(url1): got (%q, %v), want (%q, nil)", resolved, err, url1)
+	}
+
+	if _, err := sb.resolve("https://unallowed.com"); !errors.Is(err, ErrOutsideSandbox) {
+		t.Errorf("resolve(unallowed): got %v, want ErrOutsideSandbox", err)
+	}
+}
+
+func TestHTTPGet(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/notfound" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("webpage body content"))
+	}))
+	defer ts.Close()
+
+	sb, err := NewSandbox([]string{ts.URL, ts.URL + "/notfound"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := sb.HTTPGet(ts.URL)
+	if err != nil {
+		t.Fatalf("HTTPGet: %v", err)
+	}
+	if got != "webpage body content" {
+		t.Errorf("got %q, want %q", got, "webpage body content")
+	}
+
+	if _, err := sb.HTTPGet(ts.URL + "/notfound"); err == nil {
+		t.Error("expected error for non-200 HTTP response")
+	}
+
+	if _, err := sb.HTTPGet("http://unauthorized.org"); !errors.Is(err, ErrOutsideSandbox) {
+		t.Errorf("expected ErrOutsideSandbox for unauthorized URL, got %v", err)
+	}
+}
+
+func TestCallHTTPGet(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("tool call response"))
+	}))
+	defer ts.Close()
+
+	sb, err := NewSandbox([]string{ts.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := Call(sb, "http_get", map[string]any{"link": ts.URL})
+	if err != nil {
+		t.Fatalf("Call(http_get): %v", err)
+	}
+	if out != "tool call response" {
+		t.Errorf("got %q, want %q", out, "tool call response")
+	}
+
+	outUrl, err := Call(sb, "http_get", map[string]any{"url": ts.URL})
+	if err != nil {
+		t.Fatalf("Call(http_get with url key): %v", err)
+	}
+	if outUrl != "tool call response" {
+		t.Errorf("got %q, want %q", outUrl, "tool call response")
+	}
+
+	if _, err := Call(sb, "http_get", map[string]any{}); err == nil {
+		t.Error("expected missing link to return error")
+	}
+
+	if _, err := Call(sb, "http_get", map[string]any{"link": "http://other.org"}); err == nil {
+		t.Error("expected unauthorized link to return error")
 	}
 }

@@ -4,13 +4,16 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ignoredDirs are skipped while walking a sandbox tree.
@@ -139,7 +142,7 @@ func NewSandbox(paths []string) (*Sandbox, error) {
 
 	roots := deriveRoots(dirs, files)
 
-	return &Sandbox{dirs: dirs, files: files, roots: roots}, nil
+	return &Sandbox{dirs: dirs, files: files, links: links, roots: roots}, nil
 }
 
 // Dirs returns the sandbox's absolute directories, most specific first.
@@ -148,7 +151,7 @@ func (s *Sandbox) Dirs() []string { return s.dirs }
 // Files returns the sandbox's explicitly allowed absolute file paths.
 func (s *Sandbox) Files() []string { return s.files }
 
-// Files returns the sandbox's explicitly allowed absolute file paths.
+// Links returns the sandbox's explicitly allowed web links.
 func (s *Sandbox) Links() []string { return s.links }
 
 // resolve maps a caller-supplied path to an absolute path inside the
@@ -371,4 +374,41 @@ func (s *Sandbox) grepFile(re *regexp.Regexp, path string, matches *[]Match) err
 		}
 	}
 	return nil
+}
+
+// http_get sends a GET request to the provided link, returning the webpage content as a string,
+// or an error.
+// TODO(trolllemon): is returning as a single string optimal here?
+func (s *Sandbox) http_get(link string) (string, error) {
+	resolved, err := s.resolve(link)
+	if err != nil {
+		return "", err
+	}
+
+	client := &http.Client{
+		Timeout: 10 * time.Second, // TODO(trolllemon) make this configurable
+	}
+
+	resp, err := client.Get(resolved)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch URL: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP error %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read body: %w", err)
+	}
+
+	return string(bodyBytes), nil
+}
+
+// HTTPGet sends a GET request to the provided link, returning the webpage content as a string,
+// or an error.
+func (s *Sandbox) HTTPGet(link string) (string, error) {
+	return s.http_get(link)
 }
