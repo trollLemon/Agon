@@ -212,7 +212,7 @@ func (a *App) startDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 	var sandbox *tools.Sandbox
 	var sandboxDirs, sandboxFiles []string
 	if paths := tools.ParsePathList(msg.Sandbox); len(paths) > 0 {
-		sb, err := tools.NewSandboxPaths(paths)
+		sb, err := tools.NewSandbox(paths)
 		if err != nil {
 			a.form.SetError("sandbox: " + err.Error())
 			return a, nil

@@ -25,14 +25,14 @@ func TestParsePathList(t *testing.T) {
 	}
 }
 
-func TestNewSandboxPathsClassifiesFilesAndDirs(t *testing.T) {
+func TestNewSandboxClassifiesFilesAndDirs(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "notes.md")
 	if err := os.WriteFile(file, []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	sb, err := NewSandboxPaths([]string{root, file})
+	sb, err := NewSandbox([]string{root, file})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,10 +43,10 @@ func TestNewSandboxPathsClassifiesFilesAndDirs(t *testing.T) {
 		t.Errorf("Files: got %v, want [%s]", got, file)
 	}
 
-	if _, err := NewSandboxPaths(nil); !errors.Is(err, ErrNoDirs) {
-		t.Errorf("NewSandboxPaths(nil): got %v, want ErrNoDirs", err)
+	if _, err := NewSandbox(nil); !errors.Is(err, ErrNoDirs) {
+		t.Errorf("NewSandbox(nil): got %v, want ErrNoDirs", err)
 	}
-	if _, err := NewSandboxPaths([]string{filepath.Join(root, "missing")}); err == nil {
+	if _, err := NewSandbox([]string{filepath.Join(root, "missing")}); err == nil {
 		t.Error("expected error for a nonexistent path")
 	}
 }
@@ -62,7 +62,7 @@ func TestFileSandboxToolAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sb, err := NewSandboxPaths([]string{allowed})
+	sb, err := NewSandbox([]string{allowed})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,19 +94,12 @@ func TestFileSandboxToolAccess(t *testing.T) {
 	}
 }
 
-func TestNewSandboxValidatesDirs(t *testing.T) {
+func TestNewSandboxValidatesPaths(t *testing.T) {
 	if _, err := NewSandbox(nil); err == nil {
 		t.Error("expected error for no directories")
 	}
 	if _, err := NewSandbox([]string{"/this/path/does/not/exist-xyz"}); err == nil {
 		t.Error("expected error for nonexistent directory")
-	}
-	f := filepath.Join(t.TempDir(), "file.txt")
-	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := NewSandbox([]string{t.TempDir(), f}); err == nil {
-		t.Error("expected error naming the non-directory entry")
 	}
 }
 
@@ -150,14 +143,6 @@ func TestSandboxEscapeRejected(t *testing.T) {
 func TestSandboxSentinelErrors(t *testing.T) {
 	if _, err := NewSandbox(nil); !errors.Is(err, ErrNoDirs) {
 		t.Errorf("NewSandbox(nil): got %v, want ErrNoDirs", err)
-	}
-
-	f := filepath.Join(t.TempDir(), "file.txt")
-	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := NewSandbox([]string{f}); !errors.Is(err, ErrNotDirectory) {
-		t.Errorf("NewSandbox(file): got %v, want ErrNotDirectory", err)
 	}
 
 	root := t.TempDir()

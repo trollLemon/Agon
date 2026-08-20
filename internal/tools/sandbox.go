@@ -52,10 +52,19 @@ var (
 	errStopWalk = errors.New("stop walking")
 )
 
+// roots returns every top-level sandbox path: directories first (most
+// specific first), then explicitly allowed files.
+func deriveRoots(dirs []string, files []string) []string {
+	roots := make([]string, 0, len(dirs)+len(files))
+	roots = append(roots, dirs...)
+	roots = append(roots, files...)
+	return roots
+}
+
 // ParsePathList splits a user-entered, newline-separated list of paths into
 // cleaned entries: it trims surrounding whitespace and quotes, expands a
 // leading "~/", drops blank lines, and collapses duplicates. Existence and
-// file-vs-directory classification are left to NewSandboxPaths.
+// file-vs-directory classification are left to NewSandbox.
 func ParsePathList(text string) []string {
 	seen := map[string]bool{}
 	var paths []string
@@ -84,40 +93,14 @@ func ParsePathList(text string) []string {
 type Sandbox struct {
 	dirs  []string // absolute, most specific (longest) first
 	files []string // absolute individual files, sorted
+	roots []string // roots for every top level path
 }
 
-// NewSandbox creates a Sandbox over dirs, each of which must already exist
-// and be a directory; the first offending entry fails the call.
-func NewSandbox(dirs []string) (*Sandbox, error) {
-	if len(dirs) == 0 {
-		return nil, ErrNoDirs
-	}
-	abs := make([]string, 0, len(dirs))
-	for _, dir := range dirs {
-		a, err := filepath.Abs(dir)
-		if err != nil {
-			return nil, fmt.Errorf("resolve sandbox dir %q: %w", dir, err)
-		}
-		info, err := os.Stat(a)
-		if err != nil {
-			return nil, fmt.Errorf("sandbox dir %q: %w", dir, err)
-		}
-		if !info.IsDir() {
-			return nil, fmt.Errorf("sandbox dir %q: %w", a, ErrNotDirectory)
-		}
-		if !slices.Contains(abs, a) {
-			abs = append(abs, a)
-		}
-	}
-	sort.Slice(abs, func(i, j int) bool { return len(abs[i]) > len(abs[j]) })
-	return &Sandbox{dirs: abs}, nil
-}
-
-// NewSandboxPaths creates a Sandbox over a mix of existing files and
+// NewSandbox creates a Sandbox over a mix of existing files and
 // directories. Each path must already exist; the first missing entry fails
 // the call. Directories ground the tools over their whole tree, files grant
 // access to exactly that file.
-func NewSandboxPaths(paths []string) (*Sandbox, error) {
+func NewSandbox(paths []string) (*Sandbox, error) {
 	if len(paths) == 0 {
 		return nil, ErrNoDirs
 	}
@@ -143,23 +126,17 @@ func NewSandboxPaths(paths []string) (*Sandbox, error) {
 	}
 	sort.Slice(dirs, func(i, j int) bool { return len(dirs[i]) > len(dirs[j]) })
 	sort.Strings(files)
-	return &Sandbox{dirs: dirs, files: files}, nil
+
+	roots := deriveRoots(dirs, files)
+
+	return &Sandbox{dirs: dirs, files: files, roots: roots}, nil
 }
 
 // Dirs returns the sandbox's absolute directories, most specific first.
-func (s *Sandbox) Dirs() []string { return slices.Clone(s.dirs) }
+func (s *Sandbox) Dirs() []string { return s.dirs }
 
 // Files returns the sandbox's explicitly allowed absolute file paths.
-func (s *Sandbox) Files() []string { return slices.Clone(s.files) }
-
-// roots returns every top-level sandbox path: directories first (most
-// specific first), then explicitly allowed files.
-func (s *Sandbox) roots() []string {
-	roots := make([]string, 0, len(s.dirs)+len(s.files))
-	roots = append(roots, s.dirs...)
-	roots = append(roots, s.files...)
-	return roots
-}
+func (s *Sandbox) Files() []string { return s.files }
 
 // resolve maps a caller-supplied path to an absolute path inside the
 // sandbox. An absolute path is accepted only if it stays within one of the
@@ -172,9 +149,8 @@ func (s *Sandbox) resolve(p string) (string, error) {
 		p = "."
 	}
 	if p == "." {
-		roots := s.roots()
-		if len(roots) == 1 {
-			return roots[0], nil
+		if len(s.roots) == 1 {
+			return s.roots[0], nil
 		}
 		return "", fmt.Errorf("path %q: %w", p, ErrAmbiguousPath)
 	}
@@ -301,7 +277,7 @@ func (s *Sandbox) Grep(pattern, p string) ([]Match, error) {
 
 	var roots []string
 	if p == "" || p == "." {
-		roots = s.roots()
+		roots = s.roots
 	} else {
 		root, err := s.resolve(p)
 		if err != nil {
