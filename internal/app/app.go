@@ -64,6 +64,9 @@ type pendingDebate struct {
 	tone           prompts.Tone
 	rounds         int
 	model          string
+	sandbox        *tools.Sandbox
+	sandboxDirs    []string
+	sandboxFiles   []string
 }
 
 // New creates the root App model. engine is the (uninitialized) model
@@ -197,17 +200,32 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, cmd
 }
 
-// startDebate handles a validated form submission: it detects a repo root
-// from the starting context, bootstraps the model client if needed, and
-// either launches immediately or waits for bootstrap to finish.
+// startDebate handles a validated form submission: it builds a read-only
+// sandbox from the user-listed paths, bootstraps the model client if needed,
+// and either launches immediately or waits for bootstrap to finish.
 func (a *App) startDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 	if a.live != nil && !a.live.IsDone() {
 		a.form.SetError("a debate is already running; finish or abort it first")
 		return a, nil
 	}
+
+	var sandbox *tools.Sandbox
+	var sandboxDirs, sandboxFiles []string
+	if paths := tools.ParsePathList(msg.Sandbox); len(paths) > 0 {
+		sb, err := tools.NewSandboxPaths(paths)
+		if err != nil {
+			a.form.SetError("sandbox: " + err.Error())
+			return a, nil
+		}
+		sandbox = sb
+		sandboxDirs = sb.Dirs()
+		sandboxFiles = sb.Files()
+	}
+
 	a.pending = &pendingDebate{
 		topic: msg.Topic, context: msg.Context, mode: msg.Mode,
 		tone: msg.Tone, rounds: msg.Rounds, model: msg.Model,
+		sandbox: sandbox, sandboxDirs: sandboxDirs, sandboxFiles: sandboxFiles,
 	}
 	if a.state == Initialized {
 		return a.launchPendingDebate()
@@ -236,15 +254,6 @@ func (a *App) launchPendingDebate() (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	var sandbox *tools.Sandbox
-	var sandboxDirs []string
-	if paths, err := tools.DetectPaths(p.context); err == nil && len(paths) > 0 {
-		if sb, err := tools.NewSandbox(paths); err == nil {
-			sandbox = sb
-			sandboxDirs = paths
-		}
-	}
-
 	now := time.Now()
 	cfg := orchestrator.Config{
 		SessionID:       archive.NewSessionID(p.topic, now),
@@ -256,11 +265,12 @@ func (a *App) launchPendingDebate() (tea.Model, tea.Cmd) {
 		Rounds:          p.rounds,
 		Sides:           defaultSides(p.mode),
 		Model:           p.model,
-		SandboxDirs:     sandboxDirs,
+		SandboxDirs:     p.sandboxDirs,
+		SandboxFiles:    p.sandboxFiles,
 		CreatedAt:       now,
 	}
 
-	a.live = tui.StartLiveDebate(cfg, a.engine, sandbox, a.archiveDir)
+	a.live = tui.StartLiveDebate(cfg, a.engine, p.sandbox, a.archiveDir)
 	a.session.ShowLive(a.live)
 	a.screen = tui.ScreenSession
 	return a, tui.WaitForLiveUpdate(a.live)

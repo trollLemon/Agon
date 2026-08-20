@@ -51,9 +51,9 @@ type Debate struct {
 	cancel  context.CancelFunc
 }
 
-// New creates a Debate. If cfg.SandboxDirs is set, sandbox must be a *tools.
-// Sandbox over those directories (nil disables tool grounding regardless of
-// SandboxDirs).
+// New creates a Debate. If cfg.SandboxDirs or cfg.SandboxFiles is set, sandbox
+// must be a *tools.Sandbox over those paths (nil disables tool grounding
+// regardless of the configured paths).
 func New(cfg Config, client ChatClient, sandbox *tools.Sandbox) *Debate {
 	return &Debate{
 		cfg:     cfg,
@@ -134,6 +134,7 @@ func (d *Debate) Run(parent context.Context) (archive.Session, error) {
 		Sides:     []archive.Side{d.cfg.Sides[0], d.cfg.Sides[1]},
 		Model:     d.cfg.Model,
 		Dirs:      d.cfg.SandboxDirs,
+		Files:     d.cfg.SandboxFiles,
 		CreatedAt: d.cfg.CreatedAt,
 	}
 
@@ -185,6 +186,11 @@ func (d *Debate) fail(err error) (archive.Session, error) {
 }
 
 func (d *Debate) newSideRuntime(side, opponent archive.Side, leads bool) *sideRuntime {
+	var dirs, files []string
+	if d.sandbox != nil {
+		dirs = d.cfg.SandboxDirs
+		files = d.cfg.SandboxFiles
+	}
 	sys := prompts.DebaterSystem(prompts.DebaterParams{
 		Mode:          d.cfg.Mode,
 		Tone:          d.cfg.Tone,
@@ -193,7 +199,8 @@ func (d *Debate) newSideRuntime(side, opponent archive.Side, leads bool) *sideRu
 		OpponentLabel: opponent.Label,
 		Leads:         leads,
 		Rounds:        d.cfg.Rounds,
-		Dirs:          d.cfg.SandboxDirs,
+		Dirs:          dirs,
+		Files:         files,
 	})
 	return &sideRuntime{
 		roleName:      side.ID,
@@ -212,12 +219,16 @@ func (d *Debate) runTurn(ctx context.Context, s *sideRuntime, round int, sess *a
 	d.emit(Event{Kind: EventTurnStart, Role: s.roleName, Round: round})
 
 	var toolCallLog []archive.ToolCall
+	var toolSpecs []tools.Spec
+	if d.sandbox != nil {
+		toolSpecs = tools.Specs()
+	}
 	for i := 0; i < maxToolIterations; i++ {
 		if err := d.checkAbort(ctx); err != nil {
 			return "", err
 		}
 
-		ch, err := d.client.ChatStreaming(ctx, Role(s.roleName), s.history, tools.Specs())
+		ch, err := d.client.ChatStreaming(ctx, Role(s.roleName), s.history, toolSpecs)
 		if err != nil {
 			return "", fmt.Errorf("%s: chat streaming: %w", s.roleName, err)
 		}
@@ -268,7 +279,7 @@ func (d *Debate) runTurn(ctx context.Context, s *sideRuntime, round int, sess *a
 
 func (d *Debate) callTool(tc ToolCallRequest) (string, error) {
 	if d.sandbox == nil {
-		return "", fmt.Errorf("no repository is in scope for this debate")
+		return "", fmt.Errorf("tool %q is unavailable: this debate has no sandbox, add files or directories in the Sandbox field to give the debaters read-only access", tc.Name)
 	}
 	return tools.Call(d.sandbox, tc.Name, tc.Arguments)
 }
