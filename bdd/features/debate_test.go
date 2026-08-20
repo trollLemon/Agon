@@ -16,10 +16,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
 
+	"github.com/trollLemon/agon/internal/app"
 	"github.com/trollLemon/agon/internal/archive"
 	"github.com/trollLemon/agon/internal/orchestrator"
 	"github.com/trollLemon/agon/internal/tools"
-	"github.com/trollLemon/agon/internal/app"
 )
 
 func TestFeatures(t *testing.T) {
