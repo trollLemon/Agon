@@ -9,19 +9,36 @@ import (
 
 func TestParsePathList(t *testing.T) {
 	home, _ := os.UserHomeDir()
-	text := "  /a/b  \n\n\"/c/d\"\n/a/b\n~/notes.txt\n"
-	got := ParsePathList(text)
-	want := []string{"/a/b", "/c/d", filepath.Join(home, "notes.txt")}
-	if len(got) != len(want) {
-		t.Fatalf("got %v, want %v", got, want)
+	tests := []struct {
+		name     string
+		input    string
+		want     []string
+		wantErr  bool
+	}{
+		{
+			name: "parses paths with quotes and duplicates",
+			input: "  /a/b  \n\n\"/c/d\"\n/a/b\n~/notes.txt\n",
+			want: []string{"/a/b", "/c/d", filepath.Join(home, "notes.txt")},
+		},
+		{
+			name: "blank input yields empty",
+			input: "   \n\t\n",
+			want: []string{},
+		},
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("entry %d: got %q, want %q", i, got[i], want[i])
-		}
-	}
-	if len(ParsePathList("   \n\t\n")) != 0 {
-		t.Error("expected blank input to yield no paths")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParsePathList(tt.input)
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("entry %d: got %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
 	}
 }
 
@@ -32,22 +49,51 @@ func TestNewSandboxClassifiesFilesAndDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sb, err := NewSandbox([]string{root, file})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := sb.Dirs(); len(got) != 1 || got[0] != root {
-		t.Errorf("Dirs: got %v, want [%s]", got, root)
-	}
-	if got := sb.Files(); len(got) != 1 || got[0] != file {
-		t.Errorf("Files: got %v, want [%s]", got, file)
+	tests := []struct {
+		name        string
+		paths       []string
+		wantDirs    []string
+		wantFiles   []string
+		wantErr     error
+	}{
+		{
+			name:      "classifies dirs and files",
+			paths:     []string{root, file},
+			wantDirs:  []string{root},
+			wantFiles: []string{file},
+		},
+		{
+			name:    "nil paths returns ErrNoDirs",
+			paths:   nil,
+			wantErr: ErrNoDirs,
+		},
+		{
+			name:    "nonexistent path returns error",
+			paths:   []string{filepath.Join(root, "missing")},
+			wantErr: os.ErrNotExist,
+		},
 	}
 
-	if _, err := NewSandbox(nil); !errors.Is(err, ErrNoDirs) {
-		t.Errorf("NewSandbox(nil): got %v, want ErrNoDirs", err)
-	}
-	if _, err := NewSandbox([]string{filepath.Join(root, "missing")}); err == nil {
-		t.Error("expected error for a nonexistent path")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sb, err := NewSandbox(tt.paths)
+			if tt.wantErr != nil {
+				var wantErr error = tt.wantErr
+				if !errors.Is(err, wantErr) {
+					t.Errorf("expected %v, got %v", wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := sb.Dirs(); len(got) != len(tt.wantDirs) || (len(got) > 0 && got[0] != tt.wantDirs[0]) {
+				t.Errorf("Dirs: got %v, want %v", got, tt.wantDirs)
+			}
+			if got := sb.Files(); len(got) != len(tt.wantFiles) || (len(got) > 0 && got[0] != tt.wantFiles[0]) {
+				t.Errorf("Files: got %v, want %v", got, tt.wantFiles)
+			}
+		})
 	}
 }
 
@@ -67,14 +113,45 @@ func TestFileSandboxToolAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got, err := sb.ReadFile(allowed); err != nil || got != "package a\nfunc Do() {}\n" {
-		t.Errorf("ReadFile(allowed): got (%q, %v)", got, err)
+	tests := []struct {
+		name   string
+		fn     func() (string, error)
+		want   string
+		wantErr error
+	}{
+		{
+			name: "ReadFile with full path",
+			fn:   func() (string, error) { return sb.ReadFile(allowed) },
+			want: "package a\nfunc Do() {}\n",
+		},
+		{
+			name: "ReadFile with basename",
+			fn:   func() (string, error) { return sb.ReadFile("allowed.go") },
+			want: "package a\nfunc Do() {}\n",
+		},
+		{
+			name:     "ReadFile outside sandbox returns ErrOutsideSandbox",
+			fn:       func() (string, error) { return sb.ReadFile(other) },
+			wantErr:  ErrOutsideSandbox,
+		},
 	}
-	if got, err := sb.ReadFile("allowed.go"); err != nil || got != "package a\nfunc Do() {}\n" {
-		t.Errorf("ReadFile(basename): got (%q, %v)", got, err)
-	}
-	if _, err := sb.ReadFile(other); !errors.Is(err, ErrOutsideSandbox) {
-		t.Errorf("ReadFile(other): got %v, want ErrOutsideSandbox", err)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.fn()
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("expected %v, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
 	}
 
 	matches, err := sb.Grep(`func \w+\(`, "")
@@ -95,11 +172,22 @@ func TestFileSandboxToolAccess(t *testing.T) {
 }
 
 func TestNewSandboxValidatesPaths(t *testing.T) {
-	if _, err := NewSandbox(nil); err == nil {
-		t.Error("expected error for no directories")
+	tests := []struct {
+		name   string
+		paths  []string
+		wantErr error
+	}{
+		{"nil paths", nil, ErrNoDirs},
+		{"nonexistent directory", []string{"/this/path/does/not/exist-xyz"}, os.ErrNotExist},
 	}
-	if _, err := NewSandbox([]string{"/this/path/does/not/exist-xyz"}); err == nil {
-		t.Error("expected error for nonexistent directory")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewSandbox(tt.paths)
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("expected %v, got %v", tt.wantErr, err)
+			}
+		})
 	}
 }
 
@@ -126,9 +214,11 @@ func TestSandboxEscapeRejected(t *testing.T) {
 		"..",
 	}
 	for _, attempt := range escapeAttempts {
-		if _, err := sb.ReadFile(attempt); err == nil {
-			t.Errorf("ReadFile(%q): expected escape to be rejected", attempt)
-		}
+		t.Run(attempt, func(t *testing.T) {
+			if _, err := sb.ReadFile(attempt); err == nil {
+				t.Errorf("ReadFile(%q): expected escape to be rejected", attempt)
+			}
+		})
 	}
 
 	content, err := sb.ReadFile("in.txt")
@@ -141,34 +231,97 @@ func TestSandboxEscapeRejected(t *testing.T) {
 }
 
 func TestSandboxSentinelErrors(t *testing.T) {
-	if _, err := NewSandbox(nil); !errors.Is(err, ErrNoDirs) {
-		t.Errorf("NewSandbox(nil): got %v, want ErrNoDirs", err)
+	tests := []struct {
+		name       string
+		setup      func() *Sandbox
+		op         func(*Sandbox) error
+		wantErr    error
+	}{
+		{
+			name:  "nil paths returns ErrNoDirs",
+			setup: func() *Sandbox { return nil },
+			op: func(s *Sandbox) error {
+				_, err := NewSandbox(nil)
+				return err
+			},
+			wantErr: ErrNoDirs,
+		},
+		{
+			name: "escape returns ErrOutsideSandbox",
+			setup: func() *Sandbox {
+				root := t.TempDir()
+				sb, _ := NewSandbox([]string{root})
+				return sb
+			},
+			op: func(s *Sandbox) error {
+				_, err := s.ReadFile("../escape")
+				return err
+			},
+			wantErr: ErrOutsideSandbox,
+		},
+		{
+			name: "absolute outside returns ErrOutsideSandbox",
+			setup: func() *Sandbox {
+				root := t.TempDir()
+				sb, _ := NewSandbox([]string{root})
+				return sb
+			},
+			op: func(s *Sandbox) error {
+				_, err := s.ReadFile("/etc/passwd")
+				return err
+			},
+			wantErr: ErrOutsideSandbox,
+		},
+		{
+			name: "missing file returns ErrNotFound",
+			setup: func() *Sandbox {
+				root := t.TempDir()
+				sb, _ := NewSandbox([]string{root})
+				return sb
+			},
+			op: func(s *Sandbox) error {
+				_, err := s.ReadFile("missing.txt")
+				return err
+			},
+			wantErr: ErrNotFound,
+		},
+		{
+			name: "invalid grep pattern returns ErrInvalidPattern",
+			setup: func() *Sandbox {
+				root := t.TempDir()
+				sb, _ := NewSandbox([]string{root})
+				return sb
+			},
+			op: func(s *Sandbox) error {
+				_, err := s.Grep("(", "")
+				return err
+			},
+			wantErr: ErrInvalidPattern,
+		},
+		{
+			name: "multiple dirs ListDir ambiguous returns ErrAmbiguousPath",
+			setup: func() *Sandbox {
+				root := t.TempDir()
+				root2 := t.TempDir()
+				sb, _ := NewSandbox([]string{root, root2})
+				return sb
+			},
+			op: func(s *Sandbox) error {
+				_, err := s.ListDir("")
+				return err
+			},
+			wantErr: ErrAmbiguousPath,
+		},
 	}
 
-	root := t.TempDir()
-	sb, err := NewSandbox([]string{root})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := sb.ReadFile("../escape"); !errors.Is(err, ErrOutsideSandbox) {
-		t.Errorf("ReadFile(escape): got %v, want ErrOutsideSandbox", err)
-	}
-	if _, err := sb.ReadFile("/etc/passwd"); !errors.Is(err, ErrOutsideSandbox) {
-		t.Errorf("ReadFile(absolute outside): got %v, want ErrOutsideSandbox", err)
-	}
-	if _, err := sb.ReadFile("missing.txt"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("ReadFile(missing): got %v, want ErrNotFound", err)
-	}
-	if _, err := sb.Grep("(", ""); !errors.Is(err, ErrInvalidPattern) {
-		t.Errorf("Grep(bad pattern): got %v, want ErrInvalidPattern", err)
-	}
-
-	multi, err := NewSandbox([]string{root, t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := multi.ListDir(""); !errors.Is(err, ErrAmbiguousPath) {
-		t.Errorf("ListDir(\"\") with multiple dirs: got %v, want ErrAmbiguousPath", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sb := tt.setup()
+			err := tt.op(sb)
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("got %v, want %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
