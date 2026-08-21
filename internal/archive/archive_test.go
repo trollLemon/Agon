@@ -178,19 +178,45 @@ func utf8Len(s string) int {
 	return n
 }
 
-func TestNewSessionIDIsSlugPlusTimestamp(t *testing.T) {
-	now := time.Date(2026, 8, 12, 20, 15, 0, 0, time.UTC)
-	id := NewSessionID("Should we adopt event sourcing?", now)
-	want := "should-we-adopt-event-sourcing-20260812-201500"
-	if id != want {
-		t.Errorf("got %q, want %q", id, want)
+func TestNewSessionID(t *testing.T) {
+	tests := []struct {
+		name     string
+		topic    string
+		now      time.Time
+		expected string
+	}{
+		{
+			name:     "slug plus timestamp",
+			topic:    "Should we adopt event sourcing?",
+			now:      time.Date(2026, 8, 12, 20, 15, 0, 0, time.UTC),
+			expected: "should-we-adopt-event-sourcing-20260812-201500",
+		},
+		{
+			name:     "falls back when slug empty",
+			topic:    "???",
+			now:      time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			expected: "debate-20260101-000000",
+		},
+		{
+			name:     "special characters removed",
+			topic:    "Hello, World! @#$%",
+			now:      time.Date(2026, 6, 15, 10, 30, 0, 0, time.UTC),
+			expected: "hello-world-20260615-103000",
+		},
+		{
+			name:     "multiple spaces collapsed",
+			topic:    "a   b    c",
+			now:      time.Date(2026, 6, 15, 10, 30, 0, 0, time.UTC),
+			expected: "a-b-c-20260615-103000",
+		},
 	}
-}
 
-func TestNewSessionIDFallsBackWhenSlugEmpty(t *testing.T) {
-	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	id := NewSessionID("???", now)
-	if id != "debate-20260101-000000" {
-		t.Errorf("got %q", id)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id := NewSessionID(tt.topic, tt.now)
+			if id != tt.expected {
+				t.Errorf("got %q, want %q", id, tt.expected)
+			}
+		})
 	}
 }
