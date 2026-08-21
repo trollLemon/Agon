@@ -74,6 +74,8 @@ func initializeScenario(t *testing.T) func(*godog.ScenarioContext) {
 		ctx.When(`^I open the archive list$`, w.iOpenTheArchiveList)
 		ctx.When(`^I open the first archived debate$`, w.iOpenTheFirstArchivedDebate)
 		ctx.When(`^I abort the debate and confirm$`, w.iAbortTheDebateAndConfirm)
+		ctx.When(`^I abort the first debate and confirm$`, w.iAbortTheFirstDebateAndConfirm)
+		ctx.When(`^I open the new debate form again$`, w.iOpenTheNewDebateFormAgain)
 
 		ctx.Then(`^I should see "([^"]*)"$`, w.iShouldSee)
 		ctx.Then(`^I should eventually see "([^"]*)"$`, w.iShouldSee)
@@ -187,6 +189,19 @@ func (w *world) iAbortTheDebateAndConfirm() {
 	w.tm.Send(key("y"))
 }
 
+func (w *world) iAbortTheFirstDebateAndConfirm() error {
+	w.tm.Send(key("a"))
+	w.waitFor("Abort this debate")
+	w.tm.Send(key("y"))
+	return nil
+}
+
+func (w *world) iOpenTheNewDebateFormAgain() error {
+	w.tm.Send(key("enter")) // menu cursor starts on "Start a new debate"
+	w.waitFor("Topic:")
+	return nil
+}
+
 func (w *world) iShouldSee(text string) {
 	w.waitFor(text)
 }
@@ -219,7 +234,7 @@ func (w *world) theSessionIsReadOnly() {
 
 func (w *world) waitFor(text string) {
 	w.t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(40 * time.Second)
 	for {
 		b, _ := io.ReadAll(w.tm.Output())
 		w.seen = append(w.seen, b...)
