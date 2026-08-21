@@ -4,8 +4,8 @@ import "testing"
 
 func TestBootLogAppendAndTail(t *testing.T) {
 	tests := []struct {
-		name     string
-		appends  []struct {
+		name    string
+		appends []struct {
 			msg  string
 			args []any
 		}

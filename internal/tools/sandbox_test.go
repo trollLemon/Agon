@@ -10,20 +10,20 @@ import (
 func TestParsePathList(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	tests := []struct {
-		name     string
-		input    string
-		want     []string
-		wantErr  bool
+		name    string
+		input   string
+		want    []string
+		wantErr bool
 	}{
 		{
-			name: "parses paths with quotes and duplicates",
+			name:  "parses paths with quotes and duplicates",
 			input: "  /a/b  \n\n\"/c/d\"\n/a/b\n~/notes.txt\n",
-			want: []string{"/a/b", "/c/d", filepath.Join(home, "notes.txt")},
+			want:  []string{"/a/b", "/c/d", filepath.Join(home, "notes.txt")},
 		},
 		{
-			name: "blank input yields empty",
+			name:  "blank input yields empty",
 			input: "   \n\t\n",
-			want: []string{},
+			want:  []string{},
 		},
 	}
 
@@ -50,11 +50,11 @@ func TestNewSandboxClassifiesFilesAndDirs(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		paths       []string
-		wantDirs    []string
-		wantFiles   []string
-		wantErr     error
+		name      string
+		paths     []string
+		wantDirs  []string
+		wantFiles []string
+		wantErr   error
 	}{
 		{
 			name:      "classifies dirs and files",
@@ -114,9 +114,9 @@ func TestFileSandboxToolAccess(t *testing.T) {
 	}
 
 	tests := []struct {
-		name   string
-		fn     func() (string, error)
-		want   string
+		name    string
+		fn      func() (string, error)
+		want    string
 		wantErr error
 	}{
 		{
@@ -130,9 +130,9 @@ func TestFileSandboxToolAccess(t *testing.T) {
 			want: "package a\nfunc Do() {}\n",
 		},
 		{
-			name:     "ReadFile outside sandbox returns ErrOutsideSandbox",
-			fn:       func() (string, error) { return sb.ReadFile(other) },
-			wantErr:  ErrOutsideSandbox,
+			name:    "ReadFile outside sandbox returns ErrOutsideSandbox",
+			fn:      func() (string, error) { return sb.ReadFile(other) },
+			wantErr: ErrOutsideSandbox,
 		},
 	}
 
@@ -173,8 +173,8 @@ func TestFileSandboxToolAccess(t *testing.T) {
 
 func TestNewSandboxValidatesPaths(t *testing.T) {
 	tests := []struct {
-		name   string
-		paths  []string
+		name    string
+		paths   []string
 		wantErr error
 	}{
 		{"nil paths", nil, ErrNoDirs},
@@ -232,10 +232,10 @@ func TestSandboxEscapeRejected(t *testing.T) {
 
 func TestSandboxSentinelErrors(t *testing.T) {
 	tests := []struct {
-		name       string
-		setup      func() *Sandbox
-		op         func(*Sandbox) error
-		wantErr    error
+		name    string
+		setup   func() *Sandbox
+		op      func(*Sandbox) error
+		wantErr error
 	}{
 		{
 			name:  "nil paths returns ErrNoDirs",

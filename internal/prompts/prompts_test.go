@@ -51,9 +51,9 @@ func TestDebaterSystem(t *testing.T) {
 
 func TestToneGuidancePerTone(t *testing.T) {
 	tests := []struct {
-		name     string
-		tone     Tone
-		want     string
+		name string
+		tone Tone
+		want string
 	}{
 		{"formal", ToneFormal, "ALL CAPS for emphasis"},
 		{"informal", ToneInformal, "chatroom register"},
