@@ -67,6 +67,7 @@ type pendingDebate struct {
 	sandbox        *tools.Sandbox
 	sandboxDirs    []string
 	sandboxFiles   []string
+	sandboxLinks   []string
 }
 
 // New creates the root App model. engine is the (uninitialized) model
@@ -210,7 +211,7 @@ func (a *App) startDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 	}
 
 	var sandbox *tools.Sandbox
-	var sandboxDirs, sandboxFiles []string
+	var sandboxDirs, sandboxFiles, sandboxLinks []string
 	if paths := tools.ParsePathList(msg.Sandbox); len(paths) > 0 {
 		sb, err := tools.NewSandbox(paths)
 		if err != nil {
@@ -220,12 +221,14 @@ func (a *App) startDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 		sandbox = sb
 		sandboxDirs = sb.Dirs()
 		sandboxFiles = sb.Files()
+		sandboxLinks = sb.Links()
 	}
 
 	a.pending = &pendingDebate{
 		topic: msg.Topic, context: msg.Context, mode: msg.Mode,
 		tone: msg.Tone, rounds: msg.Rounds, model: msg.Model,
-		sandbox: sandbox, sandboxDirs: sandboxDirs, sandboxFiles: sandboxFiles,
+		sandbox: sandbox, sandboxDirs: sandboxDirs,
+		sandboxFiles: sandboxFiles, sandboxLinks: sandboxLinks,
 	}
 	if a.state == Initialized {
 		return a.launchPendingDebate()
@@ -267,6 +270,7 @@ func (a *App) launchPendingDebate() (tea.Model, tea.Cmd) {
 		Model:           p.model,
 		SandboxDirs:     p.sandboxDirs,
 		SandboxFiles:    p.sandboxFiles,
+		SandboxLinks:    p.sandboxLinks,
 		CreatedAt:       now,
 	}
 

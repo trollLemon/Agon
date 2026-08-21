@@ -128,8 +128,8 @@ If you catch yourself writing a label like the ones above, stop — delete it an
 // ToolsPrompt describes the read-only tool sandbox available to debaters.
 const ToolsPrompt = `You have read-only tools (read_file, grep, list_dir) scoped to the
 	sandbox files and directories listed below. You also have a tool to view web pages (http_get).
-	Use them to ground your argument in what is actually there: only cite a file or webpage after reading it, 
-	and never invent paths, symbols, line numbers, or information. 
+	Use them to ground your argument in what is actually there: only cite a file or webpage after reading it,
+	and never invent paths, symbols, line numbers, or information.
 	Do not attempt to read anything outside the listed sandbox paths.`
 
 // SandboxDirsIntro precedes the bulleted list of sandbox directories.

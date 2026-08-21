@@ -86,6 +86,8 @@ type Config struct {
 	SandboxDirs []string // nil disables tool grounding
 	// SandboxFiles are individually allowed files tool grounding may read.
 	SandboxFiles []string
+	// SandboxLinks are individually allowed web links http_get may fetch.
+	SandboxLinks []string
 	CreatedAt    time.Time
 }
 

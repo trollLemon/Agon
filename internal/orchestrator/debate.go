@@ -135,6 +135,7 @@ func (d *Debate) Run(parent context.Context) (archive.Session, error) {
 		Model:     d.cfg.Model,
 		Dirs:      d.cfg.SandboxDirs,
 		Files:     d.cfg.SandboxFiles,
+		Links:     d.cfg.SandboxLinks,
 		CreatedAt: d.cfg.CreatedAt,
 	}
 
@@ -186,10 +187,11 @@ func (d *Debate) fail(err error) (archive.Session, error) {
 }
 
 func (d *Debate) newSideRuntime(side, opponent archive.Side, leads bool) *sideRuntime {
-	var dirs, files []string
+	var dirs, files, links []string
 	if d.sandbox != nil {
 		dirs = d.cfg.SandboxDirs
 		files = d.cfg.SandboxFiles
+		links = d.cfg.SandboxLinks
 	}
 	sys := prompts.DebaterSystem(prompts.DebaterParams{
 		Mode:          d.cfg.Mode,
@@ -201,6 +203,7 @@ func (d *Debate) newSideRuntime(side, opponent archive.Side, leads bool) *sideRu
 		Rounds:        d.cfg.Rounds,
 		Dirs:          dirs,
 		Files:         files,
+		Links:         links,
 	})
 	return &sideRuntime{
 		roleName:      side.ID,

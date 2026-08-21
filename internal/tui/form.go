@@ -50,7 +50,7 @@ func NewFormModel(defaultModel string) FormModel {
 	ctx.SetHeight(4)
 
 	sandbox := textarea.New()
-	sandbox.Placeholder = "One file path per line the read-only files and webpages debaters may inspect…"
+	sandbox.Placeholder = "One entry per line: the read-only files and webpages debaters may inspect…"
 	sandbox.SetHeight(3)
 
 	rounds := textinput.New()

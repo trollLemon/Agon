@@ -124,7 +124,7 @@ func Call(sb *Sandbox, name string, args map[string]any) (string, error) {
 		if link == "" {
 			return "", fmt.Errorf("http_get requires a link")
 		}
-		return sb.http_get(link)
+		return sb.HTTPGet(link)
 
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)

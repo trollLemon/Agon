@@ -60,8 +60,13 @@ var (
 )
 
 // urlRegex matches http(s) URLs, including hosts that are domain names,
-// bare IP addresses, or localhost, each with an optional port and path.
-var urlRegex = regexp.MustCompile(`^https?://[a-zA-Z0-9.-]+(:\d+)?(/.*)?$`)
+// bare IP addresses, or localhost, each with an optional port and an
+// optional path, query, or fragment.
+var urlRegex = regexp.MustCompile(`(?i)^https?://[a-z0-9.-]+(:\d+)?([/?#].*)?$`)
+
+// maxHTTPBodyBytes caps how much of a response body is read, so a huge page
+// can't exhaust memory or flood a turn.
+const maxHTTPBodyBytes = 5 << 20 // 5 MiB
 
 // roots returns every top-level sandbox path: directories first (most
 // specific first), then explicitly allowed files.
@@ -381,10 +386,11 @@ func (s *Sandbox) grepFile(re *regexp.Regexp, path string, matches *[]Match) err
 	return nil
 }
 
-// http_get sends a GET request to the provided link, returning the webpage content as a string,
-// or an error.
-// The returned string is a markdown render of the HTML, to avoid excessive token usage due to inline event handlers, javascript, and css.
-func (s *Sandbox) http_get(link string) (string, error) {
+// HTTPGet sends a GET request to the provided link, returning the webpage
+// content as a string, or an error. The returned string is a markdown render
+// of the HTML, to avoid excessive token usage due to inline event handlers,
+// javascript, and css.
+func (s *Sandbox) HTTPGet(link string) (string, error) {
 	resolved, err := s.resolve(link)
 	if err != nil {
 		return "", err
@@ -392,6 +398,14 @@ func (s *Sandbox) http_get(link string) (string, error) {
 
 	client := &http.Client{
 		Timeout: 10 * time.Second, // TODO(trolllemon) make this configurable
+		// Follow at most one redirect; past that, hand back the 3xx so the
+		// non-200 check below rejects it instead of chasing off-host hops.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 1 {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		},
 	}
 
 	resp, err := client.Get(resolved)
@@ -404,24 +418,15 @@ func (s *Sandbox) http_get(link string) (string, error) {
 		return "", fmt.Errorf("HTTP error %d: %s", resp.StatusCode, resp.Status)
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxHTTPBodyBytes))
 	if err != nil {
 		return "", fmt.Errorf("failed to read body: %w", err)
 	}
 
-	htmlContent := string(bodyBytes)
-
-	markdown, err := htmltomarkdown.ConvertString(htmlContent)
-
+	markdown, err := htmltomarkdown.ConvertString(string(bodyBytes))
 	if err != nil {
-		return "", fmt.Errorf("failed to convert body to markdown: %w", err)
+		return "", fmt.Errorf("%w: %v", ErrHTML2MD, err)
 	}
 
 	return markdown, nil
-}
-
-// HTTPGet sends a GET request to the provided link, returning the webpage content as a string,
-// or an error.
-func (s *Sandbox) HTTPGet(link string) (string, error) {
-	return s.http_get(link)
 }

@@ -336,6 +336,30 @@ func TestSandboxLinks(t *testing.T) {
 	}
 }
 
+func TestURLRegexForms(t *testing.T) {
+	for _, u := range []string{
+		"https://example.com/page",
+		"http://example.org/api?q=1",
+		"https://example.com#section",
+		"HTTPS://example.com/up",
+		"http://127.0.0.1:8080/x",
+	} {
+		sb, err := NewSandbox([]string{u})
+		if err != nil {
+			t.Fatalf("NewSandbox(%q): %v", u, err)
+		}
+		if resolved, err := sb.resolve(u); err != nil || resolved != u {
+			t.Errorf("resolve(%q): got (%q, %v), want exact match", u, resolved, err)
+		}
+	}
+
+	for _, u := range []string{"ftp://example.com", "https://", "/etc/passwd"} {
+		if urlRegex.MatchString(u) {
+			t.Errorf("urlRegex unexpectedly matched %q", u)
+		}
+	}
+}
+
 func TestHTTPGet(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/notfound" {
@@ -366,6 +390,43 @@ func TestHTTPGet(t *testing.T) {
 
 	if _, err := sb.HTTPGet("http://unauthorized.org"); !errors.Is(err, ErrOutsideSandbox) {
 		t.Errorf("expected ErrOutsideSandbox for unauthorized URL, got %v", err)
+	}
+}
+
+func TestHTTPGetRedirectsOnce(t *testing.T) {
+	mux := http.NewServeMux()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	mux.HandleFunc("/final", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("after one hop"))
+	})
+	mux.HandleFunc("/hop1", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, ts.URL+"/hop2", http.StatusFound)
+	})
+	mux.HandleFunc("/hop2", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, ts.URL+"/final", http.StatusFound)
+	})
+
+	sb, err := NewSandbox([]string{ts.URL + "/hop1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := sb.HTTPGet(ts.URL + "/hop1"); err == nil {
+		t.Error("expected error when a second redirect is refused")
+	}
+
+	sb2, err := NewSandbox([]string{ts.URL + "/final"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := sb2.HTTPGet(ts.URL + "/final")
+	if err != nil {
+		t.Fatalf("HTTPGet(/final): %v", err)
+	}
+	if got != "after one hop" {
+		t.Errorf("got %q, want %q", got, "after one hop")
 	}
 }
 
