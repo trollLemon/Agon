@@ -68,36 +68,21 @@ blocked until you finish or abort it.
 the bar on substance, evidence, or honesty, and both sides share one tone so the debate stays
 even.
 
-## Evidence & code debates
+## Evidence & debates
 
 Debaters back claims with **citations rendered as clickable markdown links** in the
-transcript: `[label](https://…)` for external facts, `[path:line](path#Lline)` for code.
-If the starting context contains a path that resolves to an existing directory, both
-sides get sandboxed, read-only tool access (`read_file`, `grep`, `list_dir`) to that repo
-so they can ground and cite real code; tool calls appear inline as collapsible `⚙` blocks
+transcript: `[label](https://…)` for external facts, `[path:line](path#Lline)` for files.
+If the starting context contains a path that resolves to an existing directory or file, both
+sides get sandboxed, read-only tool access (`read_file`, `grep`, `list_dir`) to that location
+so they can ground and cite real content; tool calls appear inline as collapsible `⚙` blocks
 and are recorded in the archive alongside the messages.
 
-## Layout
+## Makefile Targets
 
-```
-cmd/                    # entrypoint: bootstrap only, opens the TUI
-internal/tui/           # bubbletea screens: menu, form, session view, archive list
-internal/orchestrator/  # debate loop: roles, rounds, turn order, tool sub-loop, kronk adapter
-internal/prompts/       # persona templates (advocate/critic/judge, modes, tones)
-internal/tools/         # read_file, grep, list_dir (sandboxed to the detected repo)
-internal/archive/       # one-JSON-per-session: write-once, list, load
-features/               # godog BDD feature files, driven via teatest
-docs/                   # spec + architecture diagrams
-```
-
-## Testing
-
-```bash
-go test ./...                 # unit + BDD (features/), no model, no TTY, fast
-go test ./... -race -p 1      # race detector; -p 1 serializes package binaries
-                               # (recommended for -race: many concurrent -race
-                               # binaries can starve each other's goroutines
-                               # under real CPU contention and cause spurious
-                               # timeouts in the teatest-driven tests)
-go test ./features/...        # just the BDD scenarios (godog + teatest)
-```
+This project uses a Makefile with the following targets:
+- `make build` - Compile the binary
+- `make run` - Run the TUI in the foreground (Ctrl-C to quit)
+- `make test` - Run all tests with the race detector, serialized (recommended for -race)
+- `make vet` - Run go vet
+- `make fmt` - Check gofmt formatting
+- `make clean` - Remove the built binary
