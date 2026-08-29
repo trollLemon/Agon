@@ -28,6 +28,10 @@ test: ## Run all tests with the race detector, serialized (recommended for -race
 vet: ## Run go vet
 	@go vet ./...
 
+.PHONY: complexity
+complexity: ## Check cyclomatic complexity
+	@gocyclo -over 12 ./internal/orchestrator
+
 .PHONY: fmt
 fmt: ## Check gofmt formatting
 	@test -z "$$(gofmt -l .)" || { echo "not gofmt-formatted:"; gofmt -l .; exit 1; }
