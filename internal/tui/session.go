@@ -25,47 +25,40 @@ import (
 	"github.com/charmbracelet/glamour"
 
 	"github.com/trollLemon/agon/internal/archive"
+	"github.com/trollLemon/agon/internal/orchestrator"
 )
 
-// sessionView is a rendering-neutral snapshot of a debate: it comes either
-// from a live LiveDebate or a loaded archive.Session, so the screen only
+// SessionView is a rendering-neutral snapshot of a debate: it comes either
+// from a live debate or a loaded archive.Session, so the screen only
 // needs one render path.
-type sessionView struct {
-	sessionID string
-	title     string
-	topic     string
-	mode      string
-	tone      string
-	rounds    int
-	sides     []archive.Side
+type SessionView struct {
+	SessionID string
+	Title     string
+	Topic     string
+	Mode      string
+	Tone      string
+	Rounds    int
+	Sides     []archive.Side
 
-	messages []archive.Message
+	Messages []archive.Message
 
-	currentRole    string
-	currentRound   int
-	currentContent string
-	currentTools   []archive.ToolCall
+	CurrentRole    string
+	CurrentRound   int
+	CurrentContent string
+	CurrentTools   []archive.ToolCall
 
-	verdict string
-	live    bool
-	done    bool
-	err     error
+	Verdict string
+	Live    bool
+	Done    bool
+	Err     error
+	Queued  int
 }
 
-func fromLiveSnapshot(s liveSnapshot) sessionView {
-	return sessionView{
-		sessionID: s.sessionID, title: s.title, topic: s.topic, mode: s.mode, tone: s.tone,
-		rounds: s.rounds, sides: s.sides, messages: s.messages,
-		currentRole: s.currentRole, currentRound: s.currentRound, currentContent: s.currentContent,
-		currentTools: s.currentTools, verdict: s.verdict, live: true, done: s.done, err: s.err,
-	}
-}
-
-func fromArchivedSession(sess archive.Session) sessionView {
-	return sessionView{
-		sessionID: sess.SessionID, title: sess.Title, topic: sess.Topic, mode: sess.Mode, tone: sess.Tone,
-		rounds: sess.Rounds, sides: sess.Sides, messages: sess.Messages,
-		verdict: sess.Verdict, live: false, done: true,
+func fromArchivedSession(sess archive.Session) SessionView {
+	return SessionView{
+		SessionID: sess.SessionID, Title: sess.Title, Topic: sess.Topic, Mode: sess.Mode, Tone: sess.Tone,
+		Rounds: sess.Rounds, Sides: sess.Sides, Messages: sess.Messages,
+		Verdict: sess.Verdict, Live: false, Done: true,
 	}
 }
 
@@ -74,7 +67,7 @@ func fromArchivedSession(sess archive.Session) sessionView {
 type SessionModel struct {
 	width, height int
 	viewport      viewport.Model
-	view          sessionView
+	view          SessionView
 	confirmAbort  bool
 
 	mdRenderer      *glamour.TermRenderer // cached; glamour.NewTermRenderer is expensive to create
@@ -96,19 +89,17 @@ func (m *SessionModel) SetSize(w, h int) {
 	m.refreshViewportContent()
 }
 
-func (m *SessionModel) SessionID() string { return m.view.sessionID }
+func (m *SessionModel) SessionID() string { return m.view.SessionID }
 
-func (m *SessionModel) ShowLive(ld *LiveDebate) {
-	m.view = fromLiveSnapshot(ld.snapshot())
+func (m *SessionModel) SetView(v SessionView) {
+	m.view = v
 	m.confirmAbort = false
 	m.refreshViewportContent()
-	m.viewport.GotoBottom()
-}
-
-func (m *SessionModel) RefreshLive(ld *LiveDebate) {
-	m.view = fromLiveSnapshot(ld.snapshot())
-	m.refreshViewportContent()
-	m.viewport.GotoBottom()
+	if v.Live && !v.Done {
+		m.viewport.GotoBottom()
+	} else {
+		m.viewport.GotoTop()
+	}
 }
 
 func (m *SessionModel) ShowArchived(sess archive.Session) {
@@ -163,16 +154,15 @@ func glamourStyleOption() glamour.TermRendererOption {
 	return glamour.WithStandardStyle("dark")
 }
 
-// Update handles a keypress. live is the currently running debate, if any,
-// and is only used to honor the abort confirmation. Leaving the screen is
+// Update handles a keypress. Leaving the screen is
 // requested via SwitchScreenMsg.
-func (m SessionModel) Update(msg tea.KeyMsg, live *LiveDebate) (SessionModel, tea.Cmd) {
+func (m SessionModel) Update(msg tea.KeyMsg, curDebate *orchestrator.Debate) (SessionModel, tea.Cmd) {
 	if m.confirmAbort {
 		switch msg.String() {
 		case "y":
 			m.confirmAbort = false
-			if live != nil {
-				live.Abort("aborted by user")
+			if curDebate != nil {
+				curDebate.Abort("aborted by user")
 			}
 			return m, nil
 		default:
@@ -185,7 +175,7 @@ func (m SessionModel) Update(msg tea.KeyMsg, live *LiveDebate) (SessionModel, te
 	case "esc":
 		return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenMenu} }
 	case "a":
-		if m.view.live && !m.view.done {
+		if m.view.Live && !m.view.Done {
 			m.confirmAbort = true
 		}
 		return m, nil
@@ -215,25 +205,32 @@ func (m *SessionModel) View() string {
 	return b.String()
 }
 
-func headerLine(v sessionView, width int) string {
+func headerLine(v SessionView, width int) string {
 	indicator := "◾ archived"
-	if v.live && !v.done {
+	if v.Live && !v.Done {
 		indicator = "● live"
-	} else if v.live && v.done {
+	} else if v.Live && v.Done {
 		indicator = "✓ finished"
 	}
-	round := v.currentRound
-	if round == 0 && len(v.messages) > 0 {
-		round = v.messages[len(v.messages)-1].Round
+	round := v.CurrentRound
+	if round == 0 && len(v.Messages) > 0 {
+		round = v.Messages[len(v.Messages)-1].Round
 	}
-	if v.verdict != "" {
-		round = v.rounds
+	if v.Verdict != "" {
+		round = v.Rounds
 	}
-	title := v.title
+	title := v.Title
 	if title == "" {
 		title = "Debate"
 	}
-	line := fmt.Sprintf("%s  %s  round %d/%d  tone:%s  mode:%s", indicator, title, round, v.rounds, v.tone, v.mode)
+	queuedStr := ""
+	if v.Queued > 0 {
+		queuedStr = fmt.Sprintf(" queued:%d", v.Queued)
+		if v.Queued == 1 {
+			queuedStr = " queued"
+		}
+	}
+	line := fmt.Sprintf("%s  %s  round %d/%d  tone:%s  mode:%s%s", indicator, title, round, v.Rounds, v.Tone, v.Mode, queuedStr)
 	if width > 0 && len(line) > width {
 		line = line[:width]
 	}
@@ -241,10 +238,10 @@ func headerLine(v sessionView, width int) string {
 }
 
 // transcriptMarkdown builds the debate transcript as plain markdown (no
-// terminal rendering) from a sessionView.
-func transcriptMarkdown(v sessionView) string {
-	labels := make(map[string]string, len(v.sides))
-	for _, s := range v.sides {
+// terminal rendering) from a SessionView.
+func transcriptMarkdown(v SessionView) string {
+	labels := make(map[string]string, len(v.Sides))
+	for _, s := range v.Sides {
 		labels[s.ID] = s.Label
 	}
 	labelFor := func(role string) string {
@@ -258,23 +255,26 @@ func transcriptMarkdown(v sessionView) string {
 	}
 
 	var b strings.Builder
-	for _, m := range v.messages {
+	for _, m := range v.Messages {
 		fmt.Fprintf(&b, "**%s** _(round %d)_\n\n%s\n\n", labelFor(m.Role), m.Round, m.Content)
 		for _, tc := range m.ToolCalls {
 			fmt.Fprintf(&b, "> ⚙ %s(%s) → %s\n\n", tc.Name, tc.Args, tc.ResultSummary)
 		}
 	}
-	if v.currentRole != "" {
-		fmt.Fprintf(&b, "**%s** _(round %d, typing…)_\n\n%s\n\n", labelFor(v.currentRole), v.currentRound, v.currentContent)
-		for _, tc := range v.currentTools {
+	if v.CurrentRole != "" {
+		fmt.Fprintf(&b, "**%s** _(round %d, typing…)_\n\n%s\n\n", labelFor(v.CurrentRole), v.CurrentRound, v.CurrentContent)
+		for _, tc := range v.CurrentTools {
 			fmt.Fprintf(&b, "> ⚙ %s(%s) → %s\n\n", tc.Name, tc.Args, tc.ResultSummary)
 		}
 	}
-	if v.verdict != "" {
-		fmt.Fprintf(&b, "---\n\n### Verdict\n\n%s\n\n", v.verdict)
+	if v.Verdict != "" {
+		fmt.Fprintf(&b, "---\n\n### Verdict\n\n%s\n\n", v.Verdict)
 	}
-	if v.err != nil {
-		fmt.Fprintf(&b, "---\n\n**Error:** %s\n", v.err.Error())
+	if v.Err != nil {
+		fmt.Fprintf(&b, "---\n\n**Error:** %s\n", v.Err.Error())
+	}
+	if v.Queued > 0 {
+		fmt.Fprintf(&b, "\n\nqueued %d\n", v.Queued)
 	}
 	return b.String()
 }

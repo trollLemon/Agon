@@ -17,6 +17,7 @@ package tui
 
 import (
 	"github.com/trollLemon/agon/internal/archive"
+	"github.com/trollLemon/agon/internal/orchestrator"
 	"github.com/trollLemon/agon/internal/prompts"
 )
 
@@ -58,6 +59,12 @@ type OpenArchivedMsg struct{ SessionID string }
 // LiveUpdateMsg signals that a live debate has new events or finished; the
 // root model re-renders whichever screen is displaying that session.
 type LiveUpdateMsg struct{ SessionID string }
+
+// DebateProgressMsg carries one orchestrator Event for the live view.
+type DebateProgressMsg struct {
+	SessionID string
+	Event     orchestrator.Event
+}
 
 // ArchiveListLoadedMsg carries a freshly reloaded archive listing.
 type ArchiveListLoadedMsg struct{ Items []archive.Session }
