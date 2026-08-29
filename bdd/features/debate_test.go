@@ -69,11 +69,13 @@ func initializeScenario(t *testing.T) func(*godog.ScenarioContext) {
 		ctx.Given(`^an archived debate titled "([^"]*)" exists$`, w.anArchivedDebateTitledExists)
 
 		ctx.When(`^I open the new debate form$`, w.iOpenTheNewDebateForm)
+		ctx.When(`^I open the new debate form again$`, w.iOpenTheNewDebateFormAgain)
 		ctx.When(`^I fill in the topic "([^"]*)"$`, w.iFillInTheTopic)
 		ctx.When(`^I submit the form$`, w.iSubmitTheForm)
 		ctx.When(`^I open the archive list$`, w.iOpenTheArchiveList)
 		ctx.When(`^I open the first archived debate$`, w.iOpenTheFirstArchivedDebate)
 		ctx.When(`^I abort the debate and confirm$`, w.iAbortTheDebateAndConfirm)
+		ctx.When(`^I abort the first debate and confirm$`, w.iAbortTheFirstDebateAndConfirm)
 
 		ctx.Then(`^I should see "([^"]*)"$`, w.iShouldSee)
 		ctx.Then(`^I should eventually see "([^"]*)"$`, w.iShouldSee)
@@ -159,6 +161,20 @@ func (w *world) anArchivedDebateTitledExists(title string) error {
 func (w *world) iOpenTheNewDebateForm() {
 	w.tm.Send(key("enter")) // menu cursor starts on "Start a new debate"
 	w.waitFor("Topic:")
+}
+
+func (w *world) iOpenTheNewDebateFormAgain() {
+	w.tm.Send(key("esc"))
+	// clear seen so we wait for fresh menu after esc
+	w.seen = nil
+	time.Sleep(50 * time.Millisecond)
+	w.waitFor("Start a new debate")
+	w.tm.Send(key("enter"))
+	w.waitFor("Topic:")
+}
+
+func (w *world) iAbortTheFirstDebateAndConfirm() {
+	w.iAbortTheDebateAndConfirm()
 }
 
 func (w *world) iFillInTheTopic(topic string) {
