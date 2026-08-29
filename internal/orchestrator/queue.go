@@ -59,6 +59,17 @@ func (q *DebateQueue) Peek() *Debate {
 	return q.items[0]
 }
 
+func (q *DebateQueue) QueuedItems() []*Debate {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.items) <= 1 {
+		return nil
+	}
+	out := make([]*Debate, len(q.items)-1)
+	copy(out, q.items[1:])
+	return out
+}
+
 func RunDebates(ctx context.Context, ready <-chan error, debates <-chan *Debate, archiveDir string, onEvent func(Event)) error {
 	readyErr, err := waitReady(ctx, ready)
 	if err != nil {

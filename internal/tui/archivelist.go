@@ -22,12 +22,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/trollLemon/agon/internal/archive"
+	"github.com/trollLemon/agon/internal/orchestrator"
 )
 
 // ArchiveListModel is a cursor-based browser over archived sessions.
 type ArchiveListModel struct {
 	dir    string
 	items  []archive.Session
+	queued []*orchestrator.Debate
+	live   *orchestrator.Debate
 	cursor int
 	err    error
 }
@@ -53,6 +56,11 @@ func (m *ArchiveListModel) SetItems(items []archive.Session) {
 	if m.cursor >= len(items) {
 		m.cursor = max(0, len(items)-1)
 	}
+}
+
+func (m *ArchiveListModel) SetQueued(live *orchestrator.Debate, queued []*orchestrator.Debate) {
+	m.live = live
+	m.queued = queued
 }
 
 // Update handles a keypress. Opening a session or leaving the screen is
@@ -82,7 +90,15 @@ func (m ArchiveListModel) Update(msg tea.KeyMsg) (ArchiveListModel, tea.Cmd) {
 func (m ArchiveListModel) View() string {
 	var b strings.Builder
 	b.WriteString("Archived debates\n\n")
-	if len(m.items) == 0 {
+	if m.live != nil {
+		cfg := m.live.Config()
+		fmt.Fprintf(&b, "  [Live] %-40s  %s  %s\n", truncate(cfg.Title, 40), cfg.CreatedAt.Local().Format("2006-01-02 15:04"), cfg.Mode)
+	}
+	for _, d := range m.queued {
+		cfg := d.Config()
+		fmt.Fprintf(&b, "  [Queued] %-40s  %s  %s  queued\n", truncate(cfg.Title, 40), cfg.CreatedAt.Local().Format("2006-01-02 15:04"), cfg.Mode)
+	}
+	if len(m.items) == 0 && m.live == nil && len(m.queued) == 0 {
 		b.WriteString("(none yet)\n")
 	}
 	for i, s := range m.items {

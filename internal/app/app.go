@@ -183,9 +183,10 @@ func (a *App) View() string {
 	case tui.ScreenForm:
 		return a.form.View()
 	case tui.ScreenArchive:
+		a.archiveList.SetQueued(a.queue.Peek(), a.queue.QueuedItems())
 		return a.archiveList.View()
 	default:
-		return a.menu.View(a.isLive())
+		return a.menu.View(a.isLive(), a.queue.QueuedCount())
 	}
 }
 
@@ -193,7 +194,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch a.screen {
 	case tui.ScreenMenu:
-		a.menu, cmd = a.menu.Update(msg, a.isLive())
+		a.menu, cmd = a.menu.Update(msg, a.isLive(), a.queue.QueuedCount())
 	case tui.ScreenForm:
 		a.form, cmd = a.form.Update(msg)
 	case tui.ScreenBootstrap:
