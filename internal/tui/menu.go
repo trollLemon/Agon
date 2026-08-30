@@ -37,7 +37,7 @@ func (m MenuModel) items(live bool, queued int) []string {
 		items = append(items, "Resume live debate")
 	}
 	if queued > 0 {
-		items = append(items, fmt.Sprintf("Queued debates (%d) [queued]", queued))
+		items = append(items, fmt.Sprintf("Queued debates (%d)", queued))
 	}
 	return items
 }
@@ -64,8 +64,8 @@ func (m MenuModel) Update(msg tea.KeyMsg, live bool, queued int) (MenuModel, tea
 		case "Resume live debate":
 			return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenSession} }
 		default:
-			if strings.HasPrefix(items[m.cursor], "Queued") {
-				return m, nil
+			if strings.HasPrefix(items[m.cursor], "Queued debates") {
+				return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenQueue} }
 			}
 		}
 	}

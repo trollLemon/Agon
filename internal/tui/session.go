@@ -273,9 +273,6 @@ func transcriptMarkdown(v SessionView) string {
 	if v.Err != nil {
 		fmt.Fprintf(&b, "---\n\n**Error:** %s\n", v.Err.Error())
 	}
-	if v.Queued > 0 {
-		fmt.Fprintf(&b, "\n\nqueued %d\n", v.Queued)
-	}
 	return b.String()
 }
 

@@ -66,6 +66,7 @@ type App struct {
 	bootScreen  tui.BootstrapModel
 	archiveList tui.ArchiveListModel
 	session     tui.SessionModel
+	queueList   tui.QueueListModel
 }
 
 func New(opts Options, engine orchestrator.Engine) *App {
@@ -91,6 +92,7 @@ func New(opts Options, engine orchestrator.Engine) *App {
 		bootScreen:   tui.NewBootstrapModel(),
 		archiveList:  tui.NewArchiveListModel(opts.ArchiveDir),
 		session:      tui.NewSessionModel(),
+		queueList:    tui.NewQueueListModel(),
 	}
 	onEvent := func(ev orchestrator.Event) {
 		a.accumulateEvent(ev)
@@ -145,6 +147,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tui.ScreenSession:
 			a.refreshSession()
 			return a, a.waitForProgress()
+		case tui.ScreenQueue:
+			a.queueList.SetItems(a.allQueued())
+			return a, nil
 		}
 		return a, nil
 
@@ -185,6 +190,9 @@ func (a *App) View() string {
 	case tui.ScreenArchive:
 		a.archiveList.SetQueued(a.queue.Peek(), a.queue.QueuedItems())
 		return a.archiveList.View()
+	case tui.ScreenQueue:
+		a.queueList.SetItems(a.allQueued())
+		return a.queueList.View()
 	default:
 		return a.menu.View(a.isLive(), a.queue.QueuedCount())
 	}
@@ -206,6 +214,8 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.session, cmd = a.session.Update(msg, cur)
 	case tui.ScreenArchive:
 		a.archiveList, cmd = a.archiveList.Update(msg)
+	case tui.ScreenQueue:
+		a.queueList, cmd = a.queueList.Update(msg)
 	}
 	return a, cmd
 }
@@ -347,6 +357,9 @@ func (a *App) handleBootstrapDone(msg tui.BootstrapDoneMsg) (tea.Model, tea.Cmd)
 
 func (a *App) handleDebateProgress(msg tui.DebateProgressMsg) (tea.Model, tea.Cmd) {
 	a.refreshSession()
+	if a.screen == tui.ScreenQueue {
+		a.queueList.SetItems(a.allQueued())
+	}
 	if a.screen == tui.ScreenSession {
 		a.mu.Lock()
 		done := a.view.Done
@@ -458,6 +471,15 @@ func (a *App) isLive() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.view.Live && !a.view.Done
+}
+
+func (a *App) allQueued() []*orchestrator.Debate {
+	items := []*orchestrator.Debate{}
+	if live := a.queue.Peek(); live != nil {
+		items = append(items, live)
+		items = append(items, a.queue.QueuedItems()...)
+	}
+	return items
 }
 
 func defaultSides(mode prompts.Mode) [2]archive.Side {
