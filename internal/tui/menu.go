@@ -31,21 +31,18 @@ func NewMenuModel() MenuModel { return MenuModel{} }
 
 // items returns the menu's current entries; "Resume live debate" only
 // appears while a debate is running.
-func (m MenuModel) items(live bool, queued int) []string {
+func (m MenuModel) items(live bool) []string {
 	items := []string{"Start a new debate", "Browse archive"}
 	if live {
 		items = append(items, "Resume live debate")
-	}
-	if queued > 0 {
-		items = append(items, fmt.Sprintf("Queued debates (%d)", queued))
 	}
 	return items
 }
 
 // Update handles a keypress. Screen transitions are requested via
 // SwitchScreenMsg commands; the root model owns the actual switch.
-func (m MenuModel) Update(msg tea.KeyMsg, live bool, queued int) (MenuModel, tea.Cmd) {
-	items := m.items(live, queued)
+func (m MenuModel) Update(msg tea.KeyMsg, live bool) (MenuModel, tea.Cmd) {
+	items := m.items(live)
 	switch msg.String() {
 	case "up", "k":
 		if m.cursor > 0 {
@@ -63,19 +60,15 @@ func (m MenuModel) Update(msg tea.KeyMsg, live bool, queued int) (MenuModel, tea
 			return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenArchive} }
 		case "Resume live debate":
 			return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenSession} }
-		default:
-			if strings.HasPrefix(items[m.cursor], "Queued debates") {
-				return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenQueue} }
-			}
 		}
 	}
 	return m, nil
 }
 
-func (m MenuModel) View(live bool, queued int) string {
+func (m MenuModel) View(live bool) string {
 	var b strings.Builder
 	b.WriteString("agon — two-agent debates\n\n")
-	for i, item := range m.items(live, queued) {
+	for i, item := range m.items(live) {
 		cursor := "  "
 		if i == m.cursor {
 			cursor = "> "

@@ -51,7 +51,6 @@ type SessionView struct {
 	Live    bool
 	Done    bool
 	Err     error
-	Queued  int
 }
 
 func fromArchivedSession(sess archive.Session) SessionView {
@@ -223,14 +222,7 @@ func headerLine(v SessionView, width int) string {
 	if title == "" {
 		title = "Debate"
 	}
-	queuedStr := ""
-	if v.Queued > 0 {
-		queuedStr = fmt.Sprintf(" queued:%d", v.Queued)
-		if v.Queued == 1 {
-			queuedStr = " queued"
-		}
-	}
-	line := fmt.Sprintf("%s  %s  round %d/%d  tone:%s  mode:%s%s", indicator, title, round, v.Rounds, v.Tone, v.Mode, queuedStr)
+	line := fmt.Sprintf("%s  %s  round %d/%d  tone:%s  mode:%s", indicator, title, round, v.Rounds, v.Tone, v.Mode)
 	if width > 0 && len(line) > width {
 		line = line[:width]
 	}

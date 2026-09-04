@@ -31,7 +31,6 @@ const (
 	ScreenBootstrap
 	ScreenSession
 	ScreenArchive
-	ScreenQueue
 )
 
 // SwitchScreenMsg requests a screen change.

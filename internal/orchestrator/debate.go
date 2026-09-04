@@ -64,7 +64,6 @@ type Debate struct {
 	mu      sync.Mutex
 	aborted string
 	cancel  context.CancelFunc
-	live    bool
 }
 
 // New creates a Debate. If cfg.SandboxDirs or cfg.SandboxFiles is set, sandbox
@@ -88,20 +87,6 @@ func (d *Debate) SessionID() string { return d.cfg.SessionID }
 
 // Config returns the debate configuration.
 func (d *Debate) Config() Config { return d.cfg }
-
-// IsLive reports whether the debate is currently running.
-func (d *Debate) IsLive() bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.live
-}
-
-// SetLive marks the debate as live or queued.
-func (d *Debate) SetLive(v bool) {
-	d.mu.Lock()
-	d.live = v
-	d.mu.Unlock()
-}
 
 // Abort requests that the running debate stop as soon as possible. The
 // in-memory transcript is discarded — Run returns an *AbortedError and a

@@ -47,8 +47,6 @@ type App struct {
 
 	ctx        context.Context
 	cancel     context.CancelFunc
-	readyChan  chan error
-	queue      *orchestrator.DebateQueue
 	progressCh chan orchestrator.Event
 	initOnce   sync.Once
 	bootLog    *tui.BootLog
@@ -66,7 +64,6 @@ type App struct {
 	bootScreen  tui.BootstrapModel
 	archiveList tui.ArchiveListModel
 	session     tui.SessionModel
-	queueList   tui.QueueListModel
 }
 
 func New(opts Options, engine orchestrator.Engine) *App {
@@ -74,8 +71,6 @@ func New(opts Options, engine orchestrator.Engine) *App {
 		opts.DefaultModel = orchestrator.DefaultModel
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	readyChan := make(chan error, 1)
-	queue := orchestrator.NewDebateQueue()
 	progressCh := make(chan orchestrator.Event, 512)
 	a := &App{
 		screen:       tui.ScreenMenu,
@@ -84,24 +79,13 @@ func New(opts Options, engine orchestrator.Engine) *App {
 		engine:       engine,
 		ctx:          ctx,
 		cancel:       cancel,
-		readyChan:    readyChan,
-		queue:        queue,
 		progressCh:   progressCh,
 		menu:         tui.NewMenuModel(),
 		form:         tui.NewFormModel(opts.DefaultModel),
 		bootScreen:   tui.NewBootstrapModel(),
 		archiveList:  tui.NewArchiveListModel(opts.ArchiveDir),
 		session:      tui.NewSessionModel(),
-		queueList:    tui.NewQueueListModel(),
 	}
-	onEvent := func(ev orchestrator.Event) {
-		a.accumulateEvent(ev)
-		select {
-		case a.progressCh <- ev:
-		default:
-		}
-	}
-	go orchestrator.RunDebates(ctx, readyChan, queue.Chan(), opts.ArchiveDir, onEvent)
 	return a
 }
 
@@ -147,9 +131,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tui.ScreenSession:
 			a.refreshSession()
 			return a, a.waitForProgress()
-		case tui.ScreenQueue:
-			a.queueList.SetItems(a.allQueued())
-			return a, nil
 		}
 		return a, nil
 
@@ -188,13 +169,9 @@ func (a *App) View() string {
 	case tui.ScreenForm:
 		return a.form.View()
 	case tui.ScreenArchive:
-		a.archiveList.SetQueued(a.queue.Peek(), a.queue.QueuedItems())
 		return a.archiveList.View()
-	case tui.ScreenQueue:
-		a.queueList.SetItems(a.allQueued())
-		return a.queueList.View()
 	default:
-		return a.menu.View(a.isLive(), a.queue.QueuedCount())
+		return a.menu.View(a.isLive())
 	}
 }
 
@@ -202,7 +179,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch a.screen {
 	case tui.ScreenMenu:
-		a.menu, cmd = a.menu.Update(msg, a.isLive(), a.queue.QueuedCount())
+		a.menu, cmd = a.menu.Update(msg, a.isLive())
 	case tui.ScreenForm:
 		a.form, cmd = a.form.Update(msg)
 	case tui.ScreenBootstrap:
@@ -214,13 +191,16 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.session, cmd = a.session.Update(msg, cur)
 	case tui.ScreenArchive:
 		a.archiveList, cmd = a.archiveList.Update(msg)
-	case tui.ScreenQueue:
-		a.queueList, cmd = a.queueList.Update(msg)
 	}
 	return a, cmd
 }
 
 func (a *App) handleStartDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
+	if a.isLive() {
+		a.form.SetError("a debate is already running; finish or abort it first")
+		return a, nil
+	}
+
 	var sandbox *tools.Sandbox
 	var sandboxDirs, sandboxFiles []string
 	if paths := tools.ParsePathList(msg.Sandbox); len(paths) > 0 {
@@ -259,54 +239,7 @@ func (a *App) handleStartDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 		a.bootLog = bl
 		a.bootScreen.Start(bl)
 		a.screen = tui.ScreenBootstrap
-		modelSource := msg.Model
-		eng := a.engine
-		ctx := a.ctx
-		readyCh := a.readyChan
-		var bootstrapCmd tea.Cmd
-		a.initOnce.Do(func() {
-			bootstrapCmd = func() tea.Msg {
-				c, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-				defer cancel()
-				_ = ctx
-				err := eng.Initialize(c, modelSource, bl.Append)
-				readyCh <- err
-				if err != nil {
-					a.initOnce = sync.Once{}
-				} else {
-					a.mu.Lock()
-					a.initialized = true
-					a.mu.Unlock()
-				}
-				return tui.BootstrapDoneMsg{Err: err}
-			}
-		})
-		a.queue.Enqueue(d)
-		if d.IsLive() {
-			a.mu.Lock()
-			a.view = tui.SessionView{
-				SessionID: cfg.SessionID,
-				Title:     cfg.Title,
-				Topic:     cfg.Topic,
-				Mode:      string(cfg.Mode),
-				Tone:      string(cfg.Tone),
-				Rounds:    cfg.Rounds,
-				Sides:     []archive.Side{cfg.Sides[0], cfg.Sides[1]},
-				Live:      true,
-			}
-			a.curDebate = d
-			a.currentContent.Reset()
-			a.currentTools = nil
-			a.mu.Unlock()
-		}
-		if bootstrapCmd != nil {
-			return a, tea.Batch(bootstrapCmd, tui.WaitForBootLog())
-		}
-		return a, tui.WaitForBootLog()
-	}
-
-	a.queue.Enqueue(d)
-	if d.IsLive() {
+		// Stash pending debate as current so it can be launched after bootstrap.
 		a.mu.Lock()
 		a.view = tui.SessionView{
 			SessionID: cfg.SessionID,
@@ -322,9 +255,48 @@ func (a *App) handleStartDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 		a.currentContent.Reset()
 		a.currentTools = nil
 		a.mu.Unlock()
+		modelSource := msg.Model
+		eng := a.engine
+		var bootstrapCmd tea.Cmd
+		a.initOnce.Do(func() {
+			bootstrapCmd = func() tea.Msg {
+				c, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+				defer cancel()
+				err := eng.Initialize(c, modelSource, bl.Append)
+				if err != nil {
+					a.initOnce = sync.Once{}
+				} else {
+					a.mu.Lock()
+					a.initialized = true
+					a.mu.Unlock()
+				}
+				return tui.BootstrapDoneMsg{Err: err}
+			}
+		})
+		if bootstrapCmd != nil {
+			return a, tea.Batch(bootstrapCmd, tui.WaitForBootLog())
+		}
+		return a, tui.WaitForBootLog()
 	}
+
+	a.mu.Lock()
+	a.view = tui.SessionView{
+		SessionID: cfg.SessionID,
+		Title:     cfg.Title,
+		Topic:     cfg.Topic,
+		Mode:      string(cfg.Mode),
+		Tone:      string(cfg.Tone),
+		Rounds:    cfg.Rounds,
+		Sides:     []archive.Side{cfg.Sides[0], cfg.Sides[1]},
+		Live:      true,
+	}
+	a.curDebate = d
+	a.currentContent.Reset()
+	a.currentTools = nil
+	a.mu.Unlock()
 	a.screen = tui.ScreenSession
 	a.refreshSession()
+	a.runDebate(d)
 	return a, a.waitForProgress()
 }
 
@@ -335,21 +307,15 @@ func (a *App) handleBootstrapDone(msg tui.BootstrapDoneMsg) (tea.Model, tea.Cmd)
 	}
 	a.mu.Lock()
 	a.initialized = true
-	if a.queue.Len() > 0 && !a.view.Live {
-		cfg := a.queue.Peek().Config()
-		a.view = tui.SessionView{
-			SessionID: cfg.SessionID,
-			Title:     cfg.Title,
-			Topic:     cfg.Topic,
-			Mode:      string(cfg.Mode),
-			Tone:      string(cfg.Tone),
-			Rounds:    cfg.Rounds,
-			Sides:     []archive.Side{cfg.Sides[0], cfg.Sides[1]},
-			Live:      true,
-		}
-		a.curDebate = a.queue.Peek()
-	}
+	cur := a.curDebate
+	hasPending := cur != nil && a.view.Live && !a.view.Done
 	a.mu.Unlock()
+	if hasPending {
+		a.screen = tui.ScreenSession
+		a.refreshSession()
+		a.runDebate(cur)
+		return a, tea.Batch(a.archiveList.Reload(), a.waitForProgress())
+	}
 	a.screen = tui.ScreenSession
 	a.refreshSession()
 	return a, tea.Batch(a.archiveList.Reload(), a.waitForProgress())
@@ -357,9 +323,6 @@ func (a *App) handleBootstrapDone(msg tui.BootstrapDoneMsg) (tea.Model, tea.Cmd)
 
 func (a *App) handleDebateProgress(msg tui.DebateProgressMsg) (tea.Model, tea.Cmd) {
 	a.refreshSession()
-	if a.screen == tui.ScreenQueue {
-		a.queueList.SetItems(a.allQueued())
-	}
 	if a.screen == tui.ScreenSession {
 		a.mu.Lock()
 		done := a.view.Done
@@ -395,15 +358,10 @@ func (a *App) refreshSession() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	v := a.view
-	v.Queued = a.queue.QueuedCount()
 	a.session.SetView(v)
 }
 
 func (a *App) accumulateEvent(ev orchestrator.Event) {
-	// lock covers view + currentContent/currentTools; held only for
-	// string copy / slice append (microseconds). Events are serialized
-	// (buffer 512, blocking emit) and at most a few per turn, so
-	// contention is negligible.
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.view.Done {
@@ -454,6 +412,29 @@ func (a *App) accumulateEvent(ev orchestrator.Event) {
 	}
 }
 
+func (a *App) runDebate(d *orchestrator.Debate) {
+	onEvent := func(ev orchestrator.Event) {
+		a.accumulateEvent(ev)
+		select {
+		case a.progressCh <- ev:
+		default:
+		}
+	}
+	go func() {
+		go func() {
+			for ev := range d.Events() {
+				onEvent(ev)
+			}
+		}()
+		debateCtx := context.WithoutCancel(a.ctx)
+		sess, err := d.Run(debateCtx)
+		if err == nil {
+			if werr := archive.Write(a.archiveDir, sess); werr != nil {
+			}
+		}
+	}()
+}
+
 func (a *App) waitForProgress() tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-a.progressCh
@@ -471,15 +452,6 @@ func (a *App) isLive() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.view.Live && !a.view.Done
-}
-
-func (a *App) allQueued() []*orchestrator.Debate {
-	items := []*orchestrator.Debate{}
-	if live := a.queue.Peek(); live != nil {
-		items = append(items, live)
-		items = append(items, a.queue.QueuedItems()...)
-	}
-	return items
 }
 
 func defaultSides(mode prompts.Mode) [2]archive.Side {
