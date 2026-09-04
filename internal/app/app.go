@@ -51,7 +51,6 @@ type App struct {
 	initOnce   sync.Once
 	bootLog    *tui.BootLog
 
-	mu          sync.Mutex
 	view        tui.SessionView
 	curDebate   *orchestrator.Debate
 	initialized bool
@@ -109,9 +108,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
-			a.mu.Lock()
 			cur := a.curDebate
-			a.mu.Unlock()
 			if cur != nil {
 				cur.Abort("app quit")
 			}
@@ -185,9 +182,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tui.ScreenBootstrap:
 		a.bootScreen, cmd = a.bootScreen.HandleKey(msg)
 	case tui.ScreenSession:
-		a.mu.Lock()
 		cur := a.curDebate
-		a.mu.Unlock()
 		a.session, cmd = a.session.Update(msg, cur)
 	case tui.ScreenArchive:
 		a.archiveList, cmd = a.archiveList.Update(msg)
@@ -230,17 +225,13 @@ func (a *App) handleStartDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 	}
 	d := orchestrator.New(cfg, a.engine, sandbox)
 
-	a.mu.Lock()
 	alreadyInitialized := a.initialized
-	a.mu.Unlock()
 
 	if !alreadyInitialized {
 		bl := tui.NewBootLog()
 		a.bootLog = bl
 		a.bootScreen.Start(bl)
 		a.screen = tui.ScreenBootstrap
-		// Stash pending debate as current so it can be launched after bootstrap.
-		a.mu.Lock()
 		a.view = tui.SessionView{
 			SessionID: cfg.SessionID,
 			Title:     cfg.Title,
@@ -251,13 +242,14 @@ func (a *App) handleStartDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 			Sides:     []archive.Side{cfg.Sides[0], cfg.Sides[1]},
 			Live:      true,
 		}
+
 		a.curDebate = d
 		a.currentContent.Reset()
 		a.currentTools = nil
-		a.mu.Unlock()
 		modelSource := msg.Model
 		eng := a.engine
 		var bootstrapCmd tea.Cmd
+
 		a.initOnce.Do(func() {
 			bootstrapCmd = func() tea.Msg {
 				c, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -266,9 +258,7 @@ func (a *App) handleStartDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 				if err != nil {
 					a.initOnce = sync.Once{}
 				} else {
-					a.mu.Lock()
 					a.initialized = true
-					a.mu.Unlock()
 				}
 				return tui.BootstrapDoneMsg{Err: err}
 			}
@@ -279,7 +269,6 @@ func (a *App) handleStartDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 		return a, tui.WaitForBootLog()
 	}
 
-	a.mu.Lock()
 	a.view = tui.SessionView{
 		SessionID: cfg.SessionID,
 		Title:     cfg.Title,
@@ -293,7 +282,6 @@ func (a *App) handleStartDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 	a.curDebate = d
 	a.currentContent.Reset()
 	a.currentTools = nil
-	a.mu.Unlock()
 	a.screen = tui.ScreenSession
 	a.refreshSession()
 	a.runDebate(d)
@@ -305,11 +293,9 @@ func (a *App) handleBootstrapDone(msg tui.BootstrapDoneMsg) (tea.Model, tea.Cmd)
 		a.bootScreen.SetError(msg.Err)
 		return a, nil
 	}
-	a.mu.Lock()
 	a.initialized = true
 	cur := a.curDebate
 	hasPending := cur != nil && a.view.Live && !a.view.Done
-	a.mu.Unlock()
 	if hasPending {
 		a.screen = tui.ScreenSession
 		a.refreshSession()
@@ -324,9 +310,7 @@ func (a *App) handleBootstrapDone(msg tui.BootstrapDoneMsg) (tea.Model, tea.Cmd)
 func (a *App) handleDebateProgress(msg tui.DebateProgressMsg) (tea.Model, tea.Cmd) {
 	a.refreshSession()
 	if a.screen == tui.ScreenSession {
-		a.mu.Lock()
 		done := a.view.Done
-		a.mu.Unlock()
 		if done {
 			return a, tea.Batch(a.archiveList.Reload(), a.waitForProgress())
 		}
@@ -336,10 +320,8 @@ func (a *App) handleDebateProgress(msg tui.DebateProgressMsg) (tea.Model, tea.Cm
 }
 
 func (a *App) openArchived(sessionID string) (tea.Model, tea.Cmd) {
-	a.mu.Lock()
 	curID := a.view.SessionID
 	live := a.view.Live
-	a.mu.Unlock()
 	if live && curID == sessionID {
 		a.refreshSession()
 		a.screen = tui.ScreenSession
@@ -355,15 +337,10 @@ func (a *App) openArchived(sessionID string) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) refreshSession() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	v := a.view
-	a.session.SetView(v)
+	a.session.SetView(a.view)
 }
 
 func (a *App) accumulateEvent(ev orchestrator.Event) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.view.Done {
 		return
 	}
@@ -441,16 +418,12 @@ func (a *App) waitForProgress() tea.Cmd {
 		if !ok {
 			return nil
 		}
-		a.mu.Lock()
 		sid := a.view.SessionID
-		a.mu.Unlock()
 		return tui.DebateProgressMsg{SessionID: sid, Event: ev}
 	}
 }
 
 func (a *App) isLive() bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	return a.view.Live && !a.view.Done
 }
 
