@@ -74,13 +74,19 @@ func New(cfg Config, client ChatClient, sandbox *tools.Sandbox) *Debate {
 		cfg:     cfg,
 		client:  client,
 		sandbox: sandbox,
-		events:  make(chan Event, 256),
+		events:  make(chan Event, 512),
 	}
 }
 
 // Events returns the channel of streamed turn/token/tool/verdict events. It
 // is closed when Run returns.
 func (d *Debate) Events() <-chan Event { return d.events }
+
+// SessionID returns the session identifier for this debate.
+func (d *Debate) SessionID() string { return d.cfg.SessionID }
+
+// Config returns the debate configuration.
+func (d *Debate) Config() Config { return d.cfg }
 
 // Abort requests that the running debate stop as soon as possible. The
 // in-memory transcript is discarded — Run returns an *AbortedError and a
@@ -115,12 +121,7 @@ func (d *Debate) checkAbort(ctx context.Context) error {
 }
 
 func (d *Debate) emit(ev Event) {
-	select {
-	case d.events <- ev:
-	default:
-		// Drop rather than block a debate that has outrun its listener; the
-		// final archive.Session is authoritative regardless.
-	}
+	d.events <- ev
 }
 
 // Run executes the full debate: advocate/critic rounds, then a single judge

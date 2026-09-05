@@ -31,9 +31,9 @@ func NewMenuModel() MenuModel { return MenuModel{} }
 
 // items returns the menu's current entries; "Resume live debate" only
 // appears while a debate is running.
-func (m MenuModel) items(live *LiveDebate) []string {
+func (m MenuModel) items(live bool) []string {
 	items := []string{"Start a new debate", "Browse archive"}
-	if live != nil && !live.IsDone() {
+	if live {
 		items = append(items, "Resume live debate")
 	}
 	return items
@@ -41,7 +41,7 @@ func (m MenuModel) items(live *LiveDebate) []string {
 
 // Update handles a keypress. Screen transitions are requested via
 // SwitchScreenMsg commands; the root model owns the actual switch.
-func (m MenuModel) Update(msg tea.KeyMsg, live *LiveDebate) (MenuModel, tea.Cmd) {
+func (m MenuModel) Update(msg tea.KeyMsg, live bool) (MenuModel, tea.Cmd) {
 	items := m.items(live)
 	switch msg.String() {
 	case "up", "k":
@@ -65,7 +65,7 @@ func (m MenuModel) Update(msg tea.KeyMsg, live *LiveDebate) (MenuModel, tea.Cmd)
 	return m, nil
 }
 
-func (m MenuModel) View(live *LiveDebate) string {
+func (m MenuModel) View(live bool) string {
 	var b strings.Builder
 	b.WriteString("agon — two-agent debates\n\n")
 	for i, item := range m.items(live) {

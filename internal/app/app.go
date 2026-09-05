@@ -13,14 +13,13 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-// Package app is the root Bubble Tea model: it owns screen orchestration
-// (menu, new-debate form, bootstrap, live/archived session view, archive
-// list) and wires the tui package's screen components to the orchestrator,
-// archive, sandbox, and model engine.
 package app
 
 import (
 	"context"
+	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -32,23 +31,11 @@ import (
 	"github.com/trollLemon/agon/internal/tui"
 )
 
-// AppState holds the current state of the app:
-// - initializing: setting up required libs and agents
-// - initialized: ready for a debate.
-type AppState int
-
-const (
-	Initializing AppState = iota
-	Initialized
-)
-
-// Options configures a new App.
 type Options struct {
 	ArchiveDir   string
 	DefaultModel string
 }
 
-// App is the root Bubble Tea model.
 type App struct {
 	screen        tui.Screen
 	width, height int
@@ -56,54 +43,51 @@ type App struct {
 	archiveDir   string
 	defaultModel string
 
-	engine         orchestrator.Engine
-	state          AppState
-	initializedErr error
-	bootLog        *tui.BootLog
-	pending        *pendingDebate
+	engine orchestrator.Engine
+
+	ctx        context.Context
+	cancel     context.CancelFunc
+	progressCh chan orchestrator.Event
+	initOnce   sync.Once
+	bootLog    *tui.BootLog
+
+	view        tui.SessionView
+	curDebate   *orchestrator.Debate
+	initialized bool
+
+	currentContent strings.Builder
+	currentTools   []archive.ToolCall
 
 	menu        tui.MenuModel
 	form        tui.FormModel
 	bootScreen  tui.BootstrapModel
 	archiveList tui.ArchiveListModel
 	session     tui.SessionModel
-
-	live *tui.LiveDebate
 }
 
-// pendingDebate holds a validated form submission while the model is still
-// being initialized.
-type pendingDebate struct {
-	topic, context string
-	mode           prompts.Mode
-	tone           prompts.Tone
-	rounds         int
-	model          string
-	sandbox        *tools.Sandbox
-	sandboxDirs    []string
-	sandboxFiles   []string
-}
-
-// New creates the root App model. engine is the (uninitialized) model
-// backend the app drives.
 func New(opts Options, engine orchestrator.Engine) *App {
 	if opts.DefaultModel == "" {
 		opts.DefaultModel = orchestrator.DefaultModel
 	}
-	return &App{
+	ctx, cancel := context.WithCancel(context.Background())
+	progressCh := make(chan orchestrator.Event, 512)
+	a := &App{
 		screen:       tui.ScreenMenu,
 		archiveDir:   opts.ArchiveDir,
 		defaultModel: opts.DefaultModel,
 		engine:       engine,
+		ctx:          ctx,
+		cancel:       cancel,
+		progressCh:   progressCh,
 		menu:         tui.NewMenuModel(),
 		form:         tui.NewFormModel(opts.DefaultModel),
 		bootScreen:   tui.NewBootstrapModel(),
 		archiveList:  tui.NewArchiveListModel(opts.ArchiveDir),
 		session:      tui.NewSessionModel(),
 	}
+	return a
 }
 
-// Run starts the Bubble Tea program and blocks until the user quits.
 func Run(opts Options, engine orchestrator.Engine) error {
 	p := tea.NewProgram(New(opts, engine), tea.WithAltScreen())
 	_, err := p.Run()
@@ -124,9 +108,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
-			if a.live != nil {
-				a.live.Abort("app quit")
+			cur := a.curDebate
+			if cur != nil {
+				cur.Abort("app quit")
 			}
+			a.cancel()
 			return a, tea.Quit
 		}
 		return a.handleKey(msg)
@@ -135,43 +121,31 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.screen = msg.Screen
 		switch msg.Screen {
 		case tui.ScreenMenu:
-			if a.live.IsDone() {
-				a.live = nil // free the one-at-a-time slot once it's archived
-			}
 		case tui.ScreenForm:
 			a.form = tui.NewFormModel(a.defaultModel)
 		case tui.ScreenArchive:
 			return a, a.archiveList.Reload()
 		case tui.ScreenSession:
-			if a.live != nil {
-				a.session.ShowLive(a.live)
-				return a, tui.WaitForLiveUpdate(a.live)
-			}
+			a.refreshSession()
+			return a, a.waitForProgress()
 		}
 		return a, nil
 
 	case tui.StartDebateMsg:
-		return a.startDebate(msg)
+		return a.handleStartDebate(msg)
 
 	case tui.BootstrapDoneMsg:
-		if msg.Err != nil {
-			a.initializedErr = msg.Err
-			a.bootScreen.SetError(msg.Err)
-			return a, nil
-		}
-
-		a.state = Initialized
-		return a.launchPendingDebate()
+		return a.handleBootstrapDone(msg)
 
 	case tui.OpenArchivedMsg:
 		return a.openArchived(msg.SessionID)
 
-	case tui.LiveUpdateMsg:
-		return a.handleLiveUpdate(msg)
+	case tui.DebateProgressMsg:
+		return a.handleDebateProgress(msg)
 
 	case tui.BootLogTickMsg:
-		if a.state == Initializing {
-			a.bootScreen.Refresh()
+		a.bootScreen.Refresh()
+		if a.screen == tui.ScreenBootstrap {
 			return a, tui.WaitForBootLog()
 		}
 		return a, nil
@@ -194,7 +168,7 @@ func (a *App) View() string {
 	case tui.ScreenArchive:
 		return a.archiveList.View()
 	default:
-		return a.menu.View(a.live)
+		return a.menu.View(a.isLive())
 	}
 }
 
@@ -202,24 +176,22 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch a.screen {
 	case tui.ScreenMenu:
-		a.menu, cmd = a.menu.Update(msg, a.live)
+		a.menu, cmd = a.menu.Update(msg, a.isLive())
 	case tui.ScreenForm:
 		a.form, cmd = a.form.Update(msg)
 	case tui.ScreenBootstrap:
 		a.bootScreen, cmd = a.bootScreen.HandleKey(msg)
 	case tui.ScreenSession:
-		a.session, cmd = a.session.Update(msg, a.live)
+		cur := a.curDebate
+		a.session, cmd = a.session.Update(msg, cur)
 	case tui.ScreenArchive:
 		a.archiveList, cmd = a.archiveList.Update(msg)
 	}
 	return a, cmd
 }
 
-// startDebate handles a validated form submission: it builds a read-only
-// sandbox from the user-listed paths, bootstraps the model client if needed,
-// and either launches immediately or waits for bootstrap to finish.
-func (a *App) startDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
-	if a.live != nil && !a.live.IsDone() {
+func (a *App) handleStartDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
+	if a.isLive() {
 		a.form.SetError("a debate is already running; finish or abort it first")
 		return a, nil
 	}
@@ -236,66 +208,122 @@ func (a *App) startDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 		sandboxDirs = sb.Dirs()
 		sandboxFiles = sb.Files()
 	}
-
-	a.pending = &pendingDebate{
-		topic: msg.Topic, context: msg.Context, mode: msg.Mode,
-		tone: msg.Tone, rounds: msg.Rounds, model: msg.Model,
-		sandbox: sandbox, sandboxDirs: sandboxDirs, sandboxFiles: sandboxFiles,
-	}
-	if a.state == Initialized {
-		return a.launchPendingDebate()
-	}
-
-	a.initializedErr = nil
-	bl := tui.NewBootLog()
-	a.bootLog = bl
-	a.bootScreen.Start(bl)
-	a.screen = tui.ScreenBootstrap
-	modelSource := msg.Model
-	engine := a.engine
-	bootstrapCmd := func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-		defer cancel()
-		err := engine.Initialize(ctx, modelSource, bl.Append)
-		return tui.BootstrapDoneMsg{Err: err}
-	}
-	return a, tea.Batch(bootstrapCmd, tui.WaitForBootLog())
-}
-
-func (a *App) launchPendingDebate() (tea.Model, tea.Cmd) {
-	p := a.pending
-	a.pending = nil
-	if p == nil {
-		return a, nil
-	}
-
 	now := time.Now()
 	cfg := orchestrator.Config{
-		SessionID:       archive.NewSessionID(p.topic, now),
-		Title:           archive.SummarizeTitle(p.topic),
-		Topic:           p.topic,
-		StartingContext: p.context,
-		Mode:            p.mode,
-		Tone:            p.tone,
-		Rounds:          p.rounds,
-		Sides:           defaultSides(p.mode),
-		Model:           p.model,
-		SandboxDirs:     p.sandboxDirs,
-		SandboxFiles:    p.sandboxFiles,
+		SessionID:       archive.NewSessionID(msg.Topic, now),
+		Title:           archive.SummarizeTitle(msg.Topic),
+		Topic:           msg.Topic,
+		StartingContext: msg.Context,
+		Mode:            msg.Mode,
+		Tone:            msg.Tone,
+		Rounds:          msg.Rounds,
+		Sides:           defaultSides(msg.Mode),
+		Model:           msg.Model,
+		SandboxDirs:     sandboxDirs,
+		SandboxFiles:    sandboxFiles,
 		CreatedAt:       now,
 	}
+	d := orchestrator.New(cfg, a.engine, sandbox)
 
-	a.live = tui.StartLiveDebate(cfg, a.engine, p.sandbox, a.archiveDir)
-	a.session.ShowLive(a.live)
+	alreadyInitialized := a.initialized
+
+	if !alreadyInitialized {
+		bl := tui.NewBootLog()
+		a.bootLog = bl
+		a.bootScreen.Start(bl)
+		a.screen = tui.ScreenBootstrap
+		// Stash pending debate as current so it can be launched after bootstrap.
+		a.view = tui.SessionView{
+			SessionID: cfg.SessionID,
+			Title:     cfg.Title,
+			Topic:     cfg.Topic,
+			Mode:      string(cfg.Mode),
+			Tone:      string(cfg.Tone),
+			Rounds:    cfg.Rounds,
+			Sides:     []archive.Side{cfg.Sides[0], cfg.Sides[1]},
+			Live:      true,
+		}
+		a.curDebate = d
+		a.currentContent.Reset()
+		a.currentTools = nil
+		modelSource := msg.Model
+		eng := a.engine
+		var bootstrapCmd tea.Cmd
+		a.initOnce.Do(func() {
+			bootstrapCmd = func() tea.Msg {
+				c, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+				defer cancel()
+				err := eng.Initialize(c, modelSource, bl.Append)
+				if err != nil {
+					a.initOnce = sync.Once{}
+				}
+				return tui.BootstrapDoneMsg{Err: err}
+			}
+		})
+		if bootstrapCmd != nil {
+			return a, tea.Batch(bootstrapCmd, tui.WaitForBootLog())
+		}
+		return a, tui.WaitForBootLog()
+	}
+
+	a.view = tui.SessionView{
+		SessionID: cfg.SessionID,
+		Title:     cfg.Title,
+		Topic:     cfg.Topic,
+		Mode:      string(cfg.Mode),
+		Tone:      string(cfg.Tone),
+		Rounds:    cfg.Rounds,
+		Sides:     []archive.Side{cfg.Sides[0], cfg.Sides[1]},
+		Live:      true,
+	}
+	a.curDebate = d
+	a.currentContent.Reset()
+	a.currentTools = nil
 	a.screen = tui.ScreenSession
-	return a, tui.WaitForLiveUpdate(a.live)
+	a.refreshSession()
+	a.runDebate(d)
+	return a, a.waitForProgress()
+}
+
+func (a *App) handleBootstrapDone(msg tui.BootstrapDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		a.bootScreen.SetError(msg.Err)
+		return a, nil
+	}
+	a.initialized = true
+	cur := a.curDebate
+	hasPending := cur != nil && a.view.Live && !a.view.Done
+	if hasPending {
+		a.screen = tui.ScreenSession
+		a.refreshSession()
+		a.runDebate(cur)
+		return a, tea.Batch(a.archiveList.Reload(), a.waitForProgress())
+	}
+	a.screen = tui.ScreenSession
+	a.refreshSession()
+	return a, tea.Batch(a.archiveList.Reload(), a.waitForProgress())
+}
+
+func (a *App) handleDebateProgress(msg tui.DebateProgressMsg) (tea.Model, tea.Cmd) {
+	a.accumulateEvent(msg.Event)
+	a.refreshSession()
+	if a.screen == tui.ScreenSession {
+		done := a.view.Done
+		if done {
+			return a, tea.Batch(a.archiveList.Reload(), a.waitForProgress())
+		}
+		return a, a.waitForProgress()
+	}
+	return a, a.waitForProgress()
 }
 
 func (a *App) openArchived(sessionID string) (tea.Model, tea.Cmd) {
-	if a.live != nil && a.live.SessionID() == sessionID {
-		a.session.ShowLive(a.live)
+	curID := a.view.SessionID
+	live := a.view.Live
+	if live && curID == sessionID {
+		a.refreshSession()
 		a.screen = tui.ScreenSession
-		return a, tui.WaitForLiveUpdate(a.live)
+		return a, a.waitForProgress()
 	}
 	sess, err := archive.Load(a.archiveDir, sessionID)
 	if err != nil {
@@ -306,22 +334,91 @@ func (a *App) openArchived(sessionID string) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-func (a *App) handleLiveUpdate(msg tui.LiveUpdateMsg) (tea.Model, tea.Cmd) {
-	if a.live == nil || a.live.SessionID() != msg.SessionID {
-		return a, nil
-	}
-	if a.screen == tui.ScreenSession && a.session.SessionID() == msg.SessionID {
-		a.session.RefreshLive(a.live)
-	}
-	if a.live.IsDone() {
-		return a, a.archiveList.Reload()
-	}
-	return a, tui.WaitForLiveUpdate(a.live)
+func (a *App) refreshSession() {
+	a.session.SetView(a.view)
 }
 
-// defaultSides returns the two sides for a mode. The current form has no
-// side-naming fields (D8); versus debates rely on the topic text itself to
-// name the two options.
+func (a *App) accumulateEvent(ev orchestrator.Event) {
+	if a.view.Done {
+		return
+	}
+	switch ev.Kind {
+	case orchestrator.EventTurnStart:
+		a.view.CurrentRole = ev.Role
+		a.view.CurrentRound = ev.Round
+		a.currentContent.Reset()
+		a.currentTools = nil
+		a.view.CurrentContent = ""
+		a.view.CurrentTools = nil
+	case orchestrator.EventToken:
+		a.currentContent.WriteString(ev.Text)
+		a.view.CurrentContent = a.currentContent.String()
+	case orchestrator.EventToolCall:
+		if ev.Tool != nil {
+			a.currentTools = append(a.currentTools, *ev.Tool)
+			a.view.CurrentTools = append([]archive.ToolCall(nil), a.currentTools...)
+		}
+	case orchestrator.EventTurnEnd:
+		if ev.Role != string(orchestrator.RoleJudge) {
+			a.view.Messages = append(a.view.Messages, archive.Message{
+				Role: ev.Role, Round: ev.Round, Content: a.currentContent.String(),
+				ToolCalls: append([]archive.ToolCall(nil), a.currentTools...),
+			})
+		}
+		a.view.CurrentRole = ""
+		a.view.CurrentRound = 0
+		a.currentContent.Reset()
+		a.currentTools = nil
+		a.view.CurrentContent = ""
+		a.view.CurrentTools = nil
+	case orchestrator.EventVerdict:
+		a.view.Verdict = ev.Text
+		a.view.Done = true
+	case orchestrator.EventAborted:
+		a.view.Err = &orchestrator.AbortedError{Reason: ev.Text}
+		a.view.Done = true
+	case orchestrator.EventError:
+		if ev.Text != "" {
+			a.view.Err = fmt.Errorf("%s", ev.Text)
+		} else {
+			a.view.Err = fmt.Errorf("debate error")
+		}
+		a.view.Done = true
+	}
+}
+
+func (a *App) runDebate(d *orchestrator.Debate) {
+	go func() {
+		for ev := range d.Events() {
+			a.progressCh <- ev
+		}
+	}()
+
+	go func() {
+		debateCtx := context.WithoutCancel(a.ctx)
+		sess, err := d.Run(debateCtx)
+		if err == nil {
+			if werr := archive.Write(a.archiveDir, sess); werr != nil {
+			}
+		}
+	}()
+}
+
+func (a *App) waitForProgress() tea.Cmd {
+	sid := a.view.SessionID
+	return func() tea.Msg {
+		ev, ok := <-a.progressCh
+		if !ok {
+			return nil
+		}
+		return tui.DebateProgressMsg{SessionID: sid, Event: ev}
+	}
+}
+
+func (a *App) isLive() bool {
+	return a.view.Live && !a.view.Done
+}
+
 func defaultSides(mode prompts.Mode) [2]archive.Side {
 	if mode == prompts.ModeVersus {
 		return [2]archive.Side{
