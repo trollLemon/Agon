@@ -232,6 +232,7 @@ func (a *App) handleStartDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 		a.bootLog = bl
 		a.bootScreen.Start(bl)
 		a.screen = tui.ScreenBootstrap
+		// Stash pending debate as current so it can be launched after bootstrap.
 		a.view = tui.SessionView{
 			SessionID: cfg.SessionID,
 			Title:     cfg.Title,
@@ -242,14 +243,12 @@ func (a *App) handleStartDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 			Sides:     []archive.Side{cfg.Sides[0], cfg.Sides[1]},
 			Live:      true,
 		}
-
 		a.curDebate = d
 		a.currentContent.Reset()
 		a.currentTools = nil
 		modelSource := msg.Model
 		eng := a.engine
 		var bootstrapCmd tea.Cmd
-
 		a.initOnce.Do(func() {
 			bootstrapCmd = func() tea.Msg {
 				c, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -257,8 +256,6 @@ func (a *App) handleStartDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 				err := eng.Initialize(c, modelSource, bl.Append)
 				if err != nil {
 					a.initOnce = sync.Once{}
-				} else {
-					a.initialized = true
 				}
 				return tui.BootstrapDoneMsg{Err: err}
 			}
@@ -308,6 +305,7 @@ func (a *App) handleBootstrapDone(msg tui.BootstrapDoneMsg) (tea.Model, tea.Cmd)
 }
 
 func (a *App) handleDebateProgress(msg tui.DebateProgressMsg) (tea.Model, tea.Cmd) {
+	a.accumulateEvent(msg.Event)
 	a.refreshSession()
 	if a.screen == tui.ScreenSession {
 		done := a.view.Done
@@ -390,19 +388,13 @@ func (a *App) accumulateEvent(ev orchestrator.Event) {
 }
 
 func (a *App) runDebate(d *orchestrator.Debate) {
-	onEvent := func(ev orchestrator.Event) {
-		a.accumulateEvent(ev)
-		select {
-		case a.progressCh <- ev:
-		default:
-		}
-	}
 	go func() {
-		go func() {
-			for ev := range d.Events() {
-				onEvent(ev)
-			}
-		}()
+		for ev := range d.Events() {
+			a.progressCh <- ev
+		}
+	}()
+
+	go func() {
 		debateCtx := context.WithoutCancel(a.ctx)
 		sess, err := d.Run(debateCtx)
 		if err == nil {
@@ -413,12 +405,12 @@ func (a *App) runDebate(d *orchestrator.Debate) {
 }
 
 func (a *App) waitForProgress() tea.Cmd {
+	sid := a.view.SessionID
 	return func() tea.Msg {
 		ev, ok := <-a.progressCh
 		if !ok {
 			return nil
 		}
-		sid := a.view.SessionID
 		return tui.DebateProgressMsg{SessionID: sid, Event: ev}
 	}
 }
