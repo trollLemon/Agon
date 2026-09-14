@@ -16,9 +16,9 @@
 package tui
 
 import (
-	"github.com/trollLemon/agon/internal/archive"
 	"github.com/trollLemon/agon/internal/orchestrator"
 	"github.com/trollLemon/agon/internal/prompts"
+	"github.com/trollLemon/agon/internal/types"
 )
 
 // Screen identifies which of the app's screens is rendered. Session view is
@@ -31,6 +31,7 @@ const (
 	ScreenBootstrap
 	ScreenSession
 	ScreenArchive
+	ScreenResume
 )
 
 // SwitchScreenMsg requests a screen change.
@@ -67,4 +68,10 @@ type DebateProgressMsg struct {
 }
 
 // ArchiveListLoadedMsg carries a freshly reloaded archive listing.
-type ArchiveListLoadedMsg struct{ Items []archive.Session }
+type ArchiveListLoadedMsg struct{ Items []*types.Session }
+
+// CacheListLoadedMsg carries a freshly reloaded cache interrupted listing.
+type CacheListLoadedMsg struct{ Items []*types.Session }
+
+// OpenCachedMsg requests resuming an interrupted cached session by id.
+type OpenCachedMsg struct{ SessionID string }

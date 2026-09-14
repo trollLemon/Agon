@@ -24,12 +24,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 
-	"github.com/trollLemon/agon/internal/archive"
 	"github.com/trollLemon/agon/internal/orchestrator"
+	"github.com/trollLemon/agon/internal/types"
 )
 
 // SessionView is a rendering-neutral snapshot of a debate: it comes either
-// from a live debate or a loaded archive.Session, so the screen only
+// from a live debate or a loaded types.Session, so the screen only
 // needs one render path.
 type SessionView struct {
 	SessionID string
@@ -38,14 +38,14 @@ type SessionView struct {
 	Mode      string
 	Tone      string
 	Rounds    int
-	Sides     []archive.Side
+	Sides     []types.Side
 
-	Messages []archive.Message
+	Messages []types.Message
 
 	CurrentRole    string
 	CurrentRound   int
 	CurrentContent string
-	CurrentTools   []archive.ToolCall
+	CurrentTools   []types.ToolCall
 
 	Verdict string
 	Live    bool
@@ -53,12 +53,28 @@ type SessionView struct {
 	Err     error
 }
 
-func fromArchivedSession(sess archive.Session) SessionView {
-	return SessionView{
-		SessionID: sess.SessionID, Title: sess.Title, Topic: sess.Topic, Mode: sess.Mode, Tone: sess.Tone,
-		Rounds: sess.Rounds, Sides: sess.Sides, Messages: sess.Messages,
-		Verdict: sess.Verdict, Live: false, Done: true,
+func SessionViewFromSession(sess *types.Session, live bool) SessionView {
+	done := sess.Verdict != ""
+	if !live {
+		done = true
 	}
+	return SessionView{
+		SessionID: sess.SessionID,
+		Title:     sess.Title,
+		Topic:     sess.Topic,
+		Mode:      sess.Mode,
+		Tone:      sess.Tone,
+		Rounds:    sess.Rounds,
+		Sides:     sess.Sides,
+		Messages:  sess.Messages,
+		Verdict:   sess.Verdict,
+		Live:      live,
+		Done:      done,
+	}
+}
+
+func fromArchivedSession(sess *types.Session) SessionView {
+	return SessionViewFromSession(sess, false)
 }
 
 // SessionModel renders the exclusive full-screen session view: a header,
@@ -101,7 +117,7 @@ func (m *SessionModel) SetView(v SessionView) {
 	}
 }
 
-func (m *SessionModel) ShowArchived(sess archive.Session) {
+func (m *SessionModel) ShowArchived(sess *types.Session) {
 	m.view = fromArchivedSession(sess)
 	m.confirmAbort = false
 	m.refreshViewportContent()
@@ -199,7 +215,7 @@ func (m *SessionModel) View() string {
 	b.WriteString(m.viewport.View())
 	if m.confirmAbort {
 		b.WriteString("\n")
-		b.WriteString("Abort this debate? Its transcript will be discarded. (y/n)")
+		b.WriteString("Abort this debate? It will be kept so you can resume it later. (y/n)")
 	}
 	return b.String()
 }

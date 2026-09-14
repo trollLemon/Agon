@@ -22,43 +22,46 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/trollLemon/agon/internal/archive"
+	"github.com/trollLemon/agon/internal/cache"
 )
 
-// ArchiveListModel is a cursor-based browser over archived sessions.
-type ArchiveListModel struct {
+// CacheListModel is a cursor-based browser over interrupted cached sessions.
+// The UI title is "Resume" but the code name reflects the technical store.
+type CacheListModel struct {
 	dir    string
 	items  []*types.Session
 	cursor int
 	err    error
 }
 
-func NewArchiveListModel(dir string) ArchiveListModel {
-	return ArchiveListModel{dir: dir}
+func NewCacheListModel(dir string) CacheListModel {
+	return CacheListModel{dir: dir}
 }
 
-// Reload returns a tea.Cmd that re-reads the archive directory.
-func (m ArchiveListModel) Reload() tea.Cmd {
+// Reload returns a tea.Cmd that re-reads the cache directory for interrupted sessions.
+func (m CacheListModel) Reload() tea.Cmd {
 	dir := m.dir
 	return func() tea.Msg {
-		items, err := archive.List(dir)
+		items, err := cache.ListInterrupted(dir)
 		if err != nil {
-			return ArchiveListLoadedMsg{}
+			return CacheListLoadedMsg{}
 		}
-		return ArchiveListLoadedMsg{Items: items}
+		return CacheListLoadedMsg{Items: items}
 	}
 }
 
-func (m *ArchiveListModel) SetItems(items []*types.Session) {
+func (m *CacheListModel) SetItems(items []*types.Session) {
 	m.items = items
 	if m.cursor >= len(items) {
 		m.cursor = max(0, len(items)-1)
 	}
 }
 
-// Update handles a keypress. Opening a session or leaving the screen is
-// requested via OpenArchivedMsg / SwitchScreenMsg commands.
-func (m ArchiveListModel) Update(msg tea.KeyMsg) (ArchiveListModel, tea.Cmd) {
+func (m *CacheListModel) Items() []*types.Session { return m.items }
+
+// Update handles a keypress. Opening a cached session or leaving the screen is
+// requested via OpenCachedMsg / SwitchScreenMsg commands.
+func (m CacheListModel) Update(msg tea.KeyMsg) (CacheListModel, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenMenu} }
@@ -75,39 +78,30 @@ func (m ArchiveListModel) Update(msg tea.KeyMsg) (ArchiveListModel, tea.Cmd) {
 			return m, nil
 		}
 		sessionID := m.items[m.cursor].SessionID
-		return m, func() tea.Msg { return OpenArchivedMsg{SessionID: sessionID} }
+		return m, func() tea.Msg { return OpenCachedMsg{SessionID: sessionID} }
 	}
 	return m, nil
 }
 
-func (m ArchiveListModel) View() string {
+func (m CacheListModel) View() string {
 	var b strings.Builder
-	b.WriteString("Archived debates\n\n")
+	b.WriteString("Resume interrupted debates\n\n")
 	if len(m.items) == 0 {
-		b.WriteString("(none yet)\n")
+		b.WriteString("(none interrupted — cache is empty)\n")
 	}
 	for i, s := range m.items {
 		cursor := "  "
 		if i == m.cursor {
 			cursor = "> "
 		}
-		status := " "
-		if len(s.Aborted) > 0 {
-			status = "✗"
-		} else if s.Verdict != "" {
-			status = "✓"
+		roundInfo := ""
+		if s.Rounds > 0 {
+			doneRounds := len(s.Messages) / 2
+			roundInfo = fmt.Sprintf(" (%d/%d rounds done)", doneRounds, s.Rounds)
 		}
-		fmt.Fprintf(&b, "%s%s %-40s  %s  %s\n", cursor, status, truncate(s.Title, 40),
-			s.CreatedAt.Local().Format("2006-01-02 15:04"), s.Mode)
+		fmt.Fprintf(&b, "%s%-40s  %s  %s%s\n", cursor, truncate(s.Title, 40),
+			s.CreatedAt.Local().Format("2006-01-02 15:04"), s.Mode, roundInfo)
 	}
-	b.WriteString("\n↑/↓ select · enter open · esc back\n")
+	b.WriteString("\n↑/↓ select · enter resume · esc back\n")
 	return b.String()
-}
-
-func truncate(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n-1]) + "…"
 }

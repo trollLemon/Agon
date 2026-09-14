@@ -18,21 +18,24 @@ package app
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/trollLemon/agon/internal/archive"
+	"github.com/trollLemon/agon/internal/cache"
 	"github.com/trollLemon/agon/internal/orchestrator"
 	"github.com/trollLemon/agon/internal/prompts"
 	"github.com/trollLemon/agon/internal/tools"
 	"github.com/trollLemon/agon/internal/tui"
+	"github.com/trollLemon/agon/internal/types"
 )
 
 type Options struct {
 	ArchiveDir   string
+	CacheDir     string
 	DefaultModel string
 }
 
@@ -41,6 +44,7 @@ type App struct {
 	width, height int
 
 	archiveDir   string
+	cacheDir     string
 	defaultModel string
 
 	engine orchestrator.Engine
@@ -48,7 +52,6 @@ type App struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	progressCh chan orchestrator.Event
-	initOnce   sync.Once
 	bootLog    *tui.BootLog
 
 	view        tui.SessionView
@@ -56,24 +59,43 @@ type App struct {
 	initialized bool
 
 	currentContent strings.Builder
-	currentTools   []archive.ToolCall
+	currentTools   []types.ToolCall
 
 	menu        tui.MenuModel
 	form        tui.FormModel
 	bootScreen  tui.BootstrapModel
 	archiveList tui.ArchiveListModel
+	cacheList   tui.CacheListModel
 	session     tui.SessionModel
+}
+
+func defaultCacheDir(archiveDir string) string {
+	if archiveDir == "" {
+		return "cache"
+	}
+	dir := filepath.Dir(archiveDir)
+	if dir == "." || dir == "" {
+		return "cache"
+	}
+	return filepath.Join(dir, "cache")
 }
 
 func New(opts Options, engine orchestrator.Engine) *App {
 	if opts.DefaultModel == "" {
 		opts.DefaultModel = orchestrator.DefaultModel
 	}
+	if opts.CacheDir == "" {
+		opts.CacheDir = defaultCacheDir(opts.ArchiveDir)
+	}
+	if opts.ArchiveDir == "" {
+		opts.ArchiveDir = "debates"
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	progressCh := make(chan orchestrator.Event, 512)
 	a := &App{
 		screen:       tui.ScreenMenu,
 		archiveDir:   opts.ArchiveDir,
+		cacheDir:     opts.CacheDir,
 		defaultModel: opts.DefaultModel,
 		engine:       engine,
 		ctx:          ctx,
@@ -83,6 +105,7 @@ func New(opts Options, engine orchestrator.Engine) *App {
 		form:         tui.NewFormModel(opts.DefaultModel),
 		bootScreen:   tui.NewBootstrapModel(),
 		archiveList:  tui.NewArchiveListModel(opts.ArchiveDir),
+		cacheList:    tui.NewCacheListModel(opts.CacheDir),
 		session:      tui.NewSessionModel(),
 	}
 	return a
@@ -95,7 +118,7 @@ func Run(opts Options, engine orchestrator.Engine) error {
 }
 
 func (a *App) Init() tea.Cmd {
-	return a.archiveList.Reload()
+	return tea.Batch(a.archiveList.Reload(), a.cacheList.Reload())
 }
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -108,10 +131,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
-			cur := a.curDebate
-			if cur != nil {
-				cur.Abort("app quit")
-			}
+			// Quit without aborting: the debate stays resumable in the cache.
 			a.cancel()
 			return a, tea.Quit
 		}
@@ -121,10 +141,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.screen = msg.Screen
 		switch msg.Screen {
 		case tui.ScreenMenu:
+			return a, a.cacheList.Reload()
 		case tui.ScreenForm:
 			a.form = tui.NewFormModel(a.defaultModel)
 		case tui.ScreenArchive:
 			return a, a.archiveList.Reload()
+		case tui.ScreenResume:
+			return a, a.cacheList.Reload()
 		case tui.ScreenSession:
 			a.refreshSession()
 			return a, a.waitForProgress()
@@ -140,6 +163,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.OpenArchivedMsg:
 		return a.openArchived(msg.SessionID)
 
+	case tui.OpenCachedMsg:
+		return a.loadCacheIntoSession(msg.SessionID)
+
 	case tui.DebateProgressMsg:
 		return a.handleDebateProgress(msg)
 
@@ -152,6 +178,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tui.ArchiveListLoadedMsg:
 		a.archiveList.SetItems(msg.Items)
+		return a, nil
+
+	case tui.CacheListLoadedMsg:
+		if a.isLive() {
+			filtered := make([]*types.Session, 0, len(msg.Items))
+			liveID := a.view.SessionID
+			for _, s := range msg.Items {
+				if s.SessionID != liveID {
+					filtered = append(filtered, s)
+				}
+			}
+			a.cacheList.SetItems(filtered)
+		} else {
+			a.cacheList.SetItems(msg.Items)
+		}
 		return a, nil
 	}
 	return a, nil
@@ -167,8 +208,10 @@ func (a *App) View() string {
 		return a.form.View()
 	case tui.ScreenArchive:
 		return a.archiveList.View()
+	case tui.ScreenResume:
+		return a.cacheList.View()
 	default:
-		return a.menu.View(a.isLive())
+		return a.menu.View(a.isLive(), a.hasResumableDebates())
 	}
 }
 
@@ -176,7 +219,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch a.screen {
 	case tui.ScreenMenu:
-		a.menu, cmd = a.menu.Update(msg, a.isLive())
+		a.menu, cmd = a.menu.Update(msg, a.isLive(), a.hasResumableDebates())
 	case tui.ScreenForm:
 		a.form, cmd = a.form.Update(msg)
 	case tui.ScreenBootstrap:
@@ -186,6 +229,8 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.session, cmd = a.session.Update(msg, cur)
 	case tui.ScreenArchive:
 		a.archiveList, cmd = a.archiveList.Update(msg)
+	case tui.ScreenResume:
+		a.cacheList, cmd = a.cacheList.Update(msg)
 	}
 	return a, cmd
 }
@@ -225,64 +270,52 @@ func (a *App) handleStartDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 	}
 	d := orchestrator.New(cfg, a.engine, sandbox)
 
-	alreadyInitialized := a.initialized
-
-	if !alreadyInitialized {
-		bl := tui.NewBootLog()
-		a.bootLog = bl
-		a.bootScreen.Start(bl)
-		a.screen = tui.ScreenBootstrap
-		// Stash pending debate as current so it can be launched after bootstrap.
-		a.view = tui.SessionView{
-			SessionID: cfg.SessionID,
-			Title:     cfg.Title,
-			Topic:     cfg.Topic,
-			Mode:      string(cfg.Mode),
-			Tone:      string(cfg.Tone),
-			Rounds:    cfg.Rounds,
-			Sides:     []archive.Side{cfg.Sides[0], cfg.Sides[1]},
-			Live:      true,
-		}
-		a.curDebate = d
-		a.currentContent.Reset()
-		a.currentTools = nil
-		modelSource := msg.Model
-		eng := a.engine
-		var bootstrapCmd tea.Cmd
-		a.initOnce.Do(func() {
-			bootstrapCmd = func() tea.Msg {
-				c, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-				defer cancel()
-				err := eng.Initialize(c, modelSource, bl.Append)
-				if err != nil {
-					a.initOnce = sync.Once{}
-				}
-				return tui.BootstrapDoneMsg{Err: err}
-			}
-		})
-		if bootstrapCmd != nil {
-			return a, tea.Batch(bootstrapCmd, tui.WaitForBootLog())
-		}
-		return a, tui.WaitForBootLog()
+	if err := a.initCacheForNewDebate(cfg); err != nil {
+		a.form.SetError("cache: " + err.Error())
+		return a, nil
 	}
 
-	a.view = tui.SessionView{
-		SessionID: cfg.SessionID,
-		Title:     cfg.Title,
-		Topic:     cfg.Topic,
-		Mode:      string(cfg.Mode),
-		Tone:      string(cfg.Tone),
-		Rounds:    cfg.Rounds,
-		Sides:     []archive.Side{cfg.Sides[0], cfg.Sides[1]},
-		Live:      true,
+	view := tui.SessionViewFromSession(cfg.Session(), true)
+
+	if !a.initialized {
+		return a, a.enterBootstrap(msg.Model, d, view)
 	}
+
+	a.view = view
 	a.curDebate = d
 	a.currentContent.Reset()
 	a.currentTools = nil
 	a.screen = tui.ScreenSession
 	a.refreshSession()
 	a.runDebate(d)
-	return a, a.waitForProgress()
+	return a, tea.Batch(a.cacheList.Reload(), a.waitForProgress())
+}
+
+func (a *App) initCacheForNewDebate(cfg orchestrator.Config) error {
+	sess := cfg.Session()
+	return cache.InitCache(a.cacheDir, cfg.SessionID, sess)
+}
+
+func (a *App) enterBootstrap(modelSource string, d *orchestrator.Debate, view tui.SessionView) tea.Cmd {
+	bl := tui.NewBootLog()
+	a.bootLog = bl
+	a.bootScreen.Start(bl)
+	a.screen = tui.ScreenBootstrap
+	a.view = view
+	a.curDebate = d
+	a.currentContent.Reset()
+	a.currentTools = nil
+	return tea.Batch(a.bootstrapCmd(modelSource, bl), tui.WaitForBootLog())
+}
+
+func (a *App) bootstrapCmd(modelSource string, bl *tui.BootLog) tea.Cmd {
+	eng := a.engine
+	return func() tea.Msg {
+		c, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		err := eng.Initialize(c, modelSource, bl.Append)
+		return tui.BootstrapDoneMsg{Err: err}
+	}
 }
 
 func (a *App) handleBootstrapDone(msg tui.BootstrapDoneMsg) (tea.Model, tea.Cmd) {
@@ -297,24 +330,66 @@ func (a *App) handleBootstrapDone(msg tui.BootstrapDoneMsg) (tea.Model, tea.Cmd)
 		a.screen = tui.ScreenSession
 		a.refreshSession()
 		a.runDebate(cur)
-		return a, tea.Batch(a.archiveList.Reload(), a.waitForProgress())
+		return a, tea.Batch(a.archiveList.Reload(), a.cacheList.Reload(), a.waitForProgress())
 	}
 	a.screen = tui.ScreenSession
 	a.refreshSession()
-	return a, tea.Batch(a.archiveList.Reload(), a.waitForProgress())
+	return a, tea.Batch(a.archiveList.Reload(), a.cacheList.Reload(), a.waitForProgress())
 }
 
 func (a *App) handleDebateProgress(msg tui.DebateProgressMsg) (tea.Model, tea.Cmd) {
+	prevDone := a.view.Done
 	a.accumulateEvent(msg.Event)
 	a.refreshSession()
+
+	switch msg.Event.Kind {
+	case orchestrator.EventTurnEnd:
+		if msg.Event.Role == string(orchestrator.RoleJudge) {
+			break
+		}
+		// Interim snapshot for crash recovery; a failed snapshot is not fatal.
+		if err := a.persistCache(); err != nil && !a.view.Done {
+			a.view.Err = fmt.Errorf("cache persist: %w", err)
+			a.refreshSession()
+		}
+	case orchestrator.EventAborted:
+		// An aborted debate stays resumable: snapshot it and keep the marker.
+		if err := a.persistCache(); err != nil {
+			a.view.Err = fmt.Errorf("cache persist: %w", err)
+			a.refreshSession()
+		}
+	case orchestrator.EventError:
+		if err := a.persistCache(); err != nil && !a.view.Done {
+			a.view.Err = fmt.Errorf("cache persist: %w", err)
+			a.refreshSession()
+		}
+	}
+
 	if a.screen == tui.ScreenSession {
 		done := a.view.Done
-		if done {
-			return a, tea.Batch(a.archiveList.Reload(), a.waitForProgress())
+		if done && !prevDone {
+			return a, tea.Batch(a.archiveList.Reload(), a.cacheList.Reload(), a.waitForProgress())
 		}
 		return a, a.waitForProgress()
 	}
 	return a, a.waitForProgress()
+}
+
+// persistCache snapshots the live view into the cache; it is the sole cache writer.
+func (a *App) persistCache() error {
+	if a.curDebate == nil {
+		return nil
+	}
+	cfg := a.curDebate.Config()
+	sess := cfg.Session()
+	sess.Messages = append([]types.Message(nil), a.view.Messages...)
+	sess.Verdict = a.view.Verdict
+	if a.view.Err != nil {
+		if _, ok := a.view.Err.(*orchestrator.AbortedError); ok {
+			sess.Aborted = map[string]string{"reason": a.view.Err.Error()}
+		}
+	}
+	return cache.UpdateCache(a.cacheDir, cfg.SessionID, sess)
 }
 
 func (a *App) openArchived(sessionID string) (tea.Model, tea.Cmd) {
@@ -332,6 +407,46 @@ func (a *App) openArchived(sessionID string) (tea.Model, tea.Cmd) {
 	a.session.ShowArchived(sess)
 	a.screen = tui.ScreenSession
 	return a, nil
+}
+
+func (a *App) loadCacheIntoSession(sessionID string) (tea.Model, tea.Cmd) {
+	if a.isLive() {
+		return a, nil
+	}
+	sess, err := cache.Load(a.cacheDir, sessionID)
+	if err != nil {
+		return a, nil
+	}
+	interrupted, _ := cache.WasInterrupted(a.cacheDir, sessionID)
+	if !interrupted {
+		return a, nil
+	}
+
+	var sandbox *tools.Sandbox
+	if len(sess.Dirs) > 0 || len(sess.Files) > 0 {
+		paths := append([]string{}, sess.Dirs...)
+		paths = append(paths, sess.Files...)
+		sb, err := tools.NewSandbox(paths)
+		if err == nil {
+			sandbox = sb
+		}
+	}
+
+	d := orchestrator.NewResumed(sess, a.engine, sandbox)
+	view := tui.SessionViewFromSession(sess, true)
+
+	if !a.initialized {
+		return a, a.enterBootstrap(sess.Model, d, view)
+	}
+
+	a.view = view
+	a.curDebate = d
+	a.currentContent.Reset()
+	a.currentTools = nil
+	a.screen = tui.ScreenSession
+	a.refreshSession()
+	a.runDebate(d)
+	return a, tea.Batch(a.cacheList.Reload(), a.waitForProgress())
 }
 
 func (a *App) refreshSession() {
@@ -356,13 +471,13 @@ func (a *App) accumulateEvent(ev orchestrator.Event) {
 	case orchestrator.EventToolCall:
 		if ev.Tool != nil {
 			a.currentTools = append(a.currentTools, *ev.Tool)
-			a.view.CurrentTools = append([]archive.ToolCall(nil), a.currentTools...)
+			a.view.CurrentTools = append([]types.ToolCall(nil), a.currentTools...)
 		}
 	case orchestrator.EventTurnEnd:
 		if ev.Role != string(orchestrator.RoleJudge) {
-			a.view.Messages = append(a.view.Messages, archive.Message{
+			a.view.Messages = append(a.view.Messages, types.Message{
 				Role: ev.Role, Round: ev.Round, Content: a.currentContent.String(),
-				ToolCalls: append([]archive.ToolCall(nil), a.currentTools...),
+				ToolCalls: append([]types.ToolCall(nil), a.currentTools...),
 			})
 		}
 		a.view.CurrentRole = ""
@@ -397,9 +512,16 @@ func (a *App) runDebate(d *orchestrator.Debate) {
 	go func() {
 		debateCtx := context.WithoutCancel(a.ctx)
 		sess, err := d.Run(debateCtx)
-		if err == nil {
-			if werr := archive.Write(a.archiveDir, sess); werr != nil {
-			}
+		if err != nil {
+			return
+		}
+		// The runner owns final state: archive from memory, then drop the cache entry.
+		if err := archive.Write(a.archiveDir, sess); err != nil {
+			a.progressCh <- orchestrator.Event{Kind: orchestrator.EventError, Text: fmt.Sprintf("archive write: %v", err)}
+			return
+		}
+		if err := cache.Remove(a.cacheDir, sess.SessionID); err != nil {
+			a.progressCh <- orchestrator.Event{Kind: orchestrator.EventError, Text: fmt.Sprintf("cache cleanup: %v", err)}
 		}
 	}()
 }
@@ -419,14 +541,31 @@ func (a *App) isLive() bool {
 	return a.view.Live && !a.view.Done
 }
 
-func defaultSides(mode prompts.Mode) [2]archive.Side {
+func (a *App) hasResumableDebates() bool {
+	items := a.cacheList.Items()
+	if len(items) == 0 {
+		return false
+	}
+	if !a.isLive() {
+		return true
+	}
+	liveID := a.view.SessionID
+	for _, s := range items {
+		if s.SessionID != liveID {
+			return true
+		}
+	}
+	return false
+}
+
+func defaultSides(mode prompts.Mode) [2]types.Side {
 	if mode == prompts.ModeVersus {
-		return [2]archive.Side{
+		return [2]types.Side{
 			{ID: "optiona", Label: "Option A", Stance: "Option A"},
 			{ID: "optionb", Label: "Option B", Stance: "Option B"},
 		}
 	}
-	return [2]archive.Side{
+	return [2]types.Side{
 		{ID: "advocate", Label: "Advocate", Stance: "for"},
 		{ID: "critic", Label: "Critic", Stance: "against"},
 	}

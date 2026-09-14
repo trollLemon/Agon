@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/trollLemon/agon/internal/archive"
 	"github.com/trollLemon/agon/internal/prompts"
 	"github.com/trollLemon/agon/internal/tools"
+	"github.com/trollLemon/agon/internal/types"
 )
 
 func baseConfig(rounds int) Config {
@@ -20,7 +20,7 @@ func baseConfig(rounds int) Config {
 		Mode:      prompts.ModeProposition,
 		Tone:      prompts.ToneFormal,
 		Rounds:    rounds,
-		Sides: [2]archive.Side{
+		Sides: [2]types.Side{
 			{ID: "advocate", Label: "Advocate", Stance: "for"},
 			{ID: "critic", Label: "Critic", Stance: "against"},
 		},
@@ -97,7 +97,7 @@ func TestVersusModeUsesStanceLabels(t *testing.T) {
 	})
 	cfg := baseConfig(1)
 	cfg.Mode = prompts.ModeVersus
-	cfg.Sides = [2]archive.Side{
+	cfg.Sides = [2]types.Side{
 		{ID: "rust", Label: "Team Rust", Stance: "Rust"},
 		{ID: "go", Label: "Team Go", Stance: "Go"},
 	}
@@ -215,7 +215,7 @@ func TestToolCallWithoutSandboxErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when a tool call is requested with no sandbox")
 	}
-	if sess.SessionID != "" {
+	if sess != nil && sess.SessionID != "" {
 		t.Errorf("expected zero-value session on failure, got %+v", sess)
 	}
 }
@@ -229,7 +229,7 @@ func TestModelErrorAbortsWithNoArchive(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if sess.SessionID != "" {
+	if sess != nil && sess.SessionID != "" {
 		t.Errorf("expected zero-value session on error, got %+v", sess)
 	}
 
@@ -247,7 +247,7 @@ func TestAbortDuringTurnDiscardsTranscript(t *testing.T) {
 	d := New(baseConfig(3), client, nil)
 
 	type result struct {
-		sess archive.Session
+		sess *types.Session
 		err  error
 	}
 	resultCh := make(chan result, 1)
@@ -279,7 +279,7 @@ func TestAbortDuringTurnDiscardsTranscript(t *testing.T) {
 		if aerr.Reason != "user requested stop" {
 			t.Errorf("got reason %q", aerr.Reason)
 		}
-		if r.sess.SessionID != "" {
+		if r.sess != nil && r.sess.SessionID != "" {
 			t.Errorf("expected zero-value session after abort, got %+v", r.sess)
 		}
 	case <-time.After(2 * time.Second):
@@ -296,7 +296,7 @@ func TestAbortBeforeRunStillStopsIt(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected immediate abort error")
 	}
-	if sess.SessionID != "" {
+	if sess != nil && sess.SessionID != "" {
 		t.Errorf("expected zero-value session, got %+v", sess)
 	}
 }
@@ -313,4 +313,145 @@ func isAbortedError(err error, target **AbortedError) bool {
 		*target = ae
 	}
 	return ok
+}
+
+// resumedSession builds a session as it would appear mid-debate, with the
+// given transcript and optional verdict, so NewResumed resume paths can be
+// exercised without a live Run.
+func resumedSession(rounds int, msgs []types.Message, verdict string) *types.Session {
+	sess := baseConfig(rounds).Session()
+	sess.Messages = msgs
+	sess.Verdict = verdict
+	return sess
+}
+
+func TestNewResumedAllRoundsDoneWithVerdictReturnsImmediately(t *testing.T) {
+	msgs := []types.Message{
+		{Role: "advocate", Round: 1, Content: "a1"},
+		{Role: "critic", Round: 1, Content: "c1"},
+		{Role: "advocate", Round: 2, Content: "a2"},
+		{Role: "critic", Round: 2, Content: "c2"},
+	}
+	sess := resumedSession(2, msgs, "verdict: adopt")
+	client := newFakeClient(map[Role][]scriptStep{})
+
+	d := NewResumed(sess, client, nil)
+	got, err := d.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got.Verdict != "verdict: adopt" {
+		t.Errorf("got verdict %q", got.Verdict)
+	}
+	if len(got.Messages) != 4 {
+		t.Errorf("expected transcript untouched, got %d messages", len(got.Messages))
+	}
+	if client.callCount("advocate") != 0 || client.callCount("critic") != 0 || client.callCount(RoleJudge) != 0 {
+		t.Errorf("expected no model calls when resuming a completed debate, got %d/%d/%d",
+			client.callCount("advocate"), client.callCount("critic"), client.callCount(RoleJudge))
+	}
+}
+
+func TestNewResumedRoundOneLeadOnlyRegeneratesFollower(t *testing.T) {
+	// Crash after the round-1 lead landed: the follower, round 2, and the
+	// judge must still run.
+	msgs := []types.Message{{Role: "advocate", Round: 1, Content: "a1"}}
+	sess := resumedSession(2, msgs, "")
+	client := newFakeClient(map[Role][]scriptStep{
+		"advocate": {{content: "a2"}},
+		"critic":   {{content: "c1"}, {content: "c2"}},
+		RoleJudge:  {{content: "verdict: adopt"}},
+	})
+
+	d := NewResumed(sess, client, nil)
+	got, err := d.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want := []struct {
+		role    string
+		round   int
+		content string
+	}{
+		{"advocate", 1, "a1"},
+		{"critic", 1, "c1"},
+		{"advocate", 2, "a2"},
+		{"critic", 2, "c2"},
+	}
+	if len(got.Messages) != len(want) {
+		t.Fatalf("got %d messages: %+v", len(got.Messages), got.Messages)
+	}
+	for i, w := range want {
+		m := got.Messages[i]
+		if m.Role != w.role || m.Round != w.round || m.Content != w.content {
+			t.Errorf("message %d: got %+v, want %+v", i, m, w)
+		}
+	}
+	if got.Verdict != "verdict: adopt" {
+		t.Errorf("got verdict %q", got.Verdict)
+	}
+}
+
+func TestNewResumedCompleteRoundOneRunsFullRoundTwo(t *testing.T) {
+	msgs := []types.Message{
+		{Role: "advocate", Round: 1, Content: "a1"},
+		{Role: "critic", Round: 1, Content: "c1"},
+	}
+	sess := resumedSession(2, msgs, "")
+	client := newFakeClient(map[Role][]scriptStep{
+		"advocate": {{content: "a2"}},
+		"critic":   {{content: "c2"}},
+		RoleJudge:  {{content: "verdict: adopt"}},
+	})
+
+	d := NewResumed(sess, client, nil)
+	got, err := d.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(got.Messages) != 4 {
+		t.Fatalf("expected 4 messages, got %d: %+v", len(got.Messages), got.Messages)
+	}
+	if got.Messages[0].Content != "a1" || got.Messages[1].Content != "c1" {
+		t.Errorf("round 1 transcript must be preserved verbatim: %+v", got.Messages[:2])
+	}
+	if got.Messages[2].Content != "a2" || got.Messages[3].Content != "c2" {
+		t.Errorf("round 2 must be regenerated: %+v", got.Messages[2:])
+	}
+	if client.callCount("advocate") != 1 || client.callCount("critic") != 1 {
+		t.Errorf("expected exactly one extra turn per debater, got adv=%d crit=%d",
+			client.callCount("advocate"), client.callCount("critic"))
+	}
+}
+
+func TestNewResumedAllRoundsDoneWithoutVerdictRunsJudgeOnly(t *testing.T) {
+	msgs := []types.Message{
+		{Role: "advocate", Round: 1, Content: "a1"},
+		{Role: "critic", Round: 1, Content: "c1"},
+		{Role: "advocate", Round: 2, Content: "a2"},
+		{Role: "critic", Round: 2, Content: "c2"},
+	}
+	sess := resumedSession(2, msgs, "")
+	client := newFakeClient(map[Role][]scriptStep{
+		RoleJudge: {{content: "verdict: adopt"}},
+	})
+
+	d := NewResumed(sess, client, nil)
+	got, err := d.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got.Verdict != "verdict: adopt" {
+		t.Errorf("got verdict %q", got.Verdict)
+	}
+	if len(got.Messages) != 4 {
+		t.Errorf("expected transcript untouched, got %d messages", len(got.Messages))
+	}
+	if client.callCount("advocate") != 0 || client.callCount("critic") != 0 {
+		t.Errorf("expected no debater calls when only the judge is missing, got adv=%d crit=%d",
+			client.callCount("advocate"), client.callCount("critic"))
+	}
+	if client.callCount(RoleJudge) != 1 {
+		t.Errorf("expected exactly one judge call, got %d", client.callCount(RoleJudge))
+	}
 }
