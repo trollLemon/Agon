@@ -19,9 +19,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/trollLemon/agon/internal/archive"
 	"github.com/trollLemon/agon/internal/prompts"
 	"github.com/trollLemon/agon/internal/tools"
+	"github.com/trollLemon/agon/internal/types"
 )
 
 // Role identifies which pseudo-agent a chat turn belongs to: a debater's
@@ -95,13 +95,35 @@ type Config struct {
 	Tone            prompts.Tone
 	Rounds          int
 	// Sides holds exactly two entries; Sides[0] leads each round.
-	Sides [2]archive.Side
+	Sides [2]types.Side
 	Model string
 	// SandboxDirs are the directories tool grounding is confined to.
 	SandboxDirs []string // nil disables tool grounding
 	// SandboxFiles are individually allowed files tool grounding may read.
 	SandboxFiles []string
 	CreatedAt    time.Time
+}
+
+// Session builds the initial types.Session for a newly created debate
+// (no messages, no verdict). It is the single source of truth for
+// Config → Session mapping; callers that need to persist interim state
+// should overlay Messages/Verdict/Aborted on the returned value.
+func (c Config) Session() *types.Session {
+	return &types.Session{
+		SessionID:       c.SessionID,
+		Title:           c.Title,
+		Topic:           c.Topic,
+		StartingContext: c.StartingContext,
+		Mode:            string(c.Mode),
+		Tone:            string(c.Tone),
+		Rounds:          c.Rounds,
+		Sides:           []types.Side{c.Sides[0], c.Sides[1]},
+		Model:           c.Model,
+		Dirs:            c.SandboxDirs,
+		Files:           c.SandboxFiles,
+		CreatedAt:       c.CreatedAt,
+		Messages:        []types.Message{},
+	}
 }
 
 // EventKind identifies the shape of an Event.
@@ -125,5 +147,5 @@ type Event struct {
 	Role  string
 	Round int
 	Text  string
-	Tool  *archive.ToolCall
+	Tool  *types.ToolCall
 }

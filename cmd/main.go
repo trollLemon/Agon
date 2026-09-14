@@ -27,8 +27,12 @@ import (
 // session.
 const archiveDir = "debates"
 
+// cacheDir holds in-progress debates, one subdir per session with
+// SESSION_CACHE and IN_PROGRESS sentinel.
+const cacheDir = "cache"
+
 func main() {
-	if err := app.Run(app.Options{ArchiveDir: archiveDir}, orchestrator.NewKronkEngine()); err != nil {
+	if err := app.Run(app.Options{ArchiveDir: archiveDir, CacheDir: cacheDir}, orchestrator.NewKronkEngine()); err != nil {
 		fmt.Fprintln(os.Stderr, "agon:", err)
 		os.Exit(1)
 	}

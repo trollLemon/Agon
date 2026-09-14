@@ -5,26 +5,32 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/trollLemon/agon/internal/types"
 )
 
-func sampleSession(id string) Session {
-	return Session{
-		SessionID: id,
+func sampleSession(id string) types.Session {
+	sid := id
+	if sid == "" {
+		sid = "sample-default"
+	}
+	return types.Session{
+		SessionID: sid,
 		Title:     "Adopt Event Sourcing",
 		Topic:     "Should we adopt event sourcing for the orders service?",
 		Mode:      "proposition",
 		Tone:      "formal",
 		Rounds:    2,
-		Sides: []Side{
+		Sides: []types.Side{
 			{ID: "advocate", Label: "Advocate", Stance: "for"},
 			{ID: "critic", Label: "Critic", Stance: "against"},
 		},
 		Model:     "unsloth/Qwen3-0.6B-Q8_0",
 		CreatedAt: time.Date(2026, 8, 12, 19, 0, 0, 0, time.UTC),
-		Messages: []Message{
+		Messages: []types.Message{
 			{Role: "advocate", Round: 1, Content: "opening case", TS: 1000.1},
 			{Role: "critic", Round: 1, Content: "rebuttal", TS: 1000.2,
-				ToolCalls: []ToolCall{{Name: "read_file", Args: `{"path":"a.go"}`, ResultSummary: "120 bytes"}}},
+				ToolCalls: []types.ToolCall{{Name: "read_file", Args: `{"path":"a.go"}`, ResultSummary: "120 bytes"}}},
 		},
 		Verdict: "adopt",
 	}
@@ -32,9 +38,9 @@ func sampleSession(id string) Session {
 
 func TestWriteThenLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	want := sampleSession("adopt-event-sourcing-20260812-190000")
+	want := sampleSession("s-roundtrip")
 
-	if err := Write(dir, want); err != nil {
+	if err := Write(dir, &want); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
@@ -53,33 +59,44 @@ func TestWriteThenLoadRoundTrip(t *testing.T) {
 func TestWriteIsAtomicNoTempFilesLeftBehind(t *testing.T) {
 	dir := t.TempDir()
 	s := sampleSession("s1")
-	if err := Write(dir, s); err != nil {
-		t.Fatalf("Write: %v", err)
+
+	for range 2 {
+		if err := Write(dir, &s); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+	}
+
+	archivePath := filepath.Join(dir, "s1.json")
+	if _, err := os.Stat(archivePath); err != nil {
+		if os.IsNotExist(err) {
+			t.Fatalf("expected archive file %q to exist after Write", archivePath)
+		}
+		t.Fatalf("stat archive path: %v", err)
 	}
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("expected exactly one file after write, got %d: %v", len(entries), entries)
-	}
-	if entries[0].Name() != "s1.json" {
-		t.Errorf("got %q, want %q", entries[0].Name(), "s1.json")
+	for _, e := range entries {
+		if e.Name() != "s1.json" {
+			t.Errorf("expected only the archive file, found %q (temp leftovers?)", e.Name())
+		}
 	}
 }
 
 func TestWriteOverwritesAtomically(t *testing.T) {
 	dir := t.TempDir()
 	s := sampleSession("s1")
-	if err := Write(dir, s); err != nil {
+
+	if err := Write(dir, &s); err != nil {
 		t.Fatal(err)
 	}
 	s.Verdict = "changed"
-	if err := Write(dir, s); err != nil {
+	if err := Write(dir, &s); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Load(dir, "s1")
+	got, err := Load(dir, s.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,18 +129,18 @@ func TestListReturnsNewestFirst(t *testing.T) {
 	newer := sampleSession("s-newer")
 	newer.CreatedAt = time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 
-	if err := Write(dir, older); err != nil {
-		t.Fatal(err)
+	if err := Write(dir, &older); err != nil {
+		t.Fatalf("Write: %v", err)
 	}
-	if err := Write(dir, newer); err != nil {
-		t.Fatal(err)
+	if err := Write(dir, &newer); err != nil {
+		t.Fatalf("Write: %v", err)
 	}
 
 	got, err := List(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0].SessionID != "s-newer" || got[1].SessionID != "s-older" {
+	if len(got) != 2 || got[0].SessionID != newer.SessionID || got[1].SessionID != older.SessionID {
 		t.Fatalf("got %+v, want newest first", got)
 	}
 	if got[0].Verdict == "" {
@@ -136,7 +153,9 @@ func TestListSkipsUnreadableFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "broken.json"), []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := Write(dir, sampleSession("good")); err != nil {
+	s := sampleSession("good")
+
+	if err := Write(dir, &s); err != nil {
 		t.Fatal(err)
 	}
 
@@ -144,7 +163,7 @@ func TestListSkipsUnreadableFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].SessionID != "good" {
+	if len(got) != 1 || got[0].SessionID != s.SessionID {
 		t.Fatalf("expected only the good session, got %+v", got)
 	}
 }
