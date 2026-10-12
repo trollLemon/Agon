@@ -22,61 +22,19 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
+
+	"github.com/trollLemon/agon/internal/types"
 )
-
-// Side is one debater in a session.
-type Side struct {
-	ID     string `json:"id"`
-	Label  string `json:"label"`
-	Stance string `json:"stance"`
-}
-
-// ToolCall records one tool invocation made while producing a message, kept
-// alongside it so citations stay auditable.
-type ToolCall struct {
-	Name          string `json:"name"`
-	Args          string `json:"args"`
-	ResultSummary string `json:"result_summary"`
-}
-
-// Message is a single transcript entry.
-type Message struct {
-	Role      string     `json:"role"`
-	Round     int        `json:"round"`
-	Content   string     `json:"content"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
-	TS        float64    `json:"ts"`
-}
-
-// Session is the full on-disk shape of one debate: metadata, transcript, and
-// verdict.
-type Session struct {
-	SessionID string            `json:"session_id"`
-	Title     string            `json:"title"`
-	Topic     string            `json:"topic"`
-	Mode      string            `json:"mode"`
-	Tone      string            `json:"tone"`
-	Rounds    int               `json:"rounds"`
-	Sides     []Side            `json:"sides"`
-	Model     string            `json:"model"`
-	Dirs      []string          `json:"dirs,omitempty"`
-	Files     []string          `json:"files,omitempty"`
-	CreatedAt time.Time         `json:"created_at"`
-	Messages  []Message         `json:"messages"`
-	Verdict   string            `json:"verdict,omitempty"`
-	Aborted   map[string]string `json:"aborted,omitempty"`
-}
 
 // path returns the archive file path for a session id within dir.
 func path(dir, sessionID string) string {
 	return filepath.Join(dir, sessionID+".json")
 }
 
-// Write persists s atomically: it writes to a temp file in dir and renames
-// it into place, so a reader never observes a partial file. It is meant to
-// be called exactly once per session, when the verdict completes.
-func Write(dir string, s Session) error {
+// Write persists s atomically to the archive directory. It writes the
+// session JSON to a temp file and renames it into place so a reader never
+// observes a partial file. Used for fixtures and direct archive creation.
+func Write(dir string, s *types.Session) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create archive dir: %w", err)
 	}
@@ -84,14 +42,12 @@ func Write(dir string, s Session) error {
 	if err != nil {
 		return fmt.Errorf("marshal session: %w", err)
 	}
-
 	tmp, err := os.CreateTemp(dir, s.SessionID+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath) // no-op once renamed
-
+	defer os.Remove(tmpPath)
 	if _, err := tmp.Write(b); err != nil {
 		tmp.Close()
 		return fmt.Errorf("write temp file: %w", err)
@@ -99,29 +55,28 @@ func Write(dir string, s Session) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp file: %w", err)
 	}
-
 	if err := os.Rename(tmpPath, path(dir, s.SessionID)); err != nil {
 		return fmt.Errorf("rename into place: %w", err)
 	}
 	return nil
 }
 
-// Load reads and parses one archived session.
-func Load(dir, sessionID string) (Session, error) {
+// Load reads and parses the one archived session from archive dir.
+func Load(dir, sessionID string) (*types.Session, error) {
 	b, err := os.ReadFile(path(dir, sessionID))
 	if err != nil {
-		return Session{}, err
+		return nil, err
 	}
-	var s Session
+	var s types.Session
 	if err := json.Unmarshal(b, &s); err != nil {
-		return Session{}, fmt.Errorf("parse session %q: %w", sessionID, err)
+		return nil, fmt.Errorf("parse session %q: %w", sessionID, err)
 	}
-	return s, nil
+	return &s, nil
 }
 
 // List returns every archived session in dir, newest first. A missing dir
 // is treated as empty, not an error.
-func List(dir string) ([]Session, error) {
+func List(dir string) ([]*types.Session, error) {
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -130,7 +85,7 @@ func List(dir string) ([]Session, error) {
 		return nil, fmt.Errorf("read archive dir: %w", err)
 	}
 
-	out := make([]Session, 0, len(entries))
+	out := make([]*types.Session, 0, len(entries))
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() || !strings.HasSuffix(name, ".json") {

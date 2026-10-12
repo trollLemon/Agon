@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/charmbracelet/x/exp/teatest"
 
 	"github.com/trollLemon/agon/internal/archive"
+	"github.com/trollLemon/agon/internal/cache"
+	"github.com/trollLemon/agon/internal/types"
 )
 
 func waitForText(t *testing.T, tm *teatest.TestModel, text string) {
@@ -72,21 +75,21 @@ func TestNewDebateEndToEnd(t *testing.T) {
 
 func TestBrowseArchivedSessionReadOnly(t *testing.T) {
 	dir := t.TempDir()
-	sess := archive.Session{
+	sess := types.Session{
 		SessionID: "demo-20260101-000000",
 		Title:     "Demo debate",
 		Topic:     "Should we ship it?",
 		Mode:      "proposition",
 		Tone:      "formal",
 		Rounds:    1,
-		Sides: []archive.Side{
+		Sides: []types.Side{
 			{ID: "advocate", Label: "Advocate", Stance: "for"},
 			{ID: "critic", Label: "Critic", Stance: "against"},
 		},
-		Messages: []archive.Message{{Role: "advocate", Round: 1, Content: "Ship it."}},
+		Messages: []types.Message{{Role: "advocate", Round: 1, Content: "Ship it."}},
 		Verdict:  "Adopt.",
 	}
-	if err := archive.Write(dir, sess); err != nil {
+	if err := archive.Write(dir, &sess); err != nil {
 		t.Fatalf("archive.Write: %v", err)
 	}
 
@@ -108,10 +111,11 @@ func TestBrowseArchivedSessionReadOnly(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(20*time.Second))
 }
 
-func TestAbortDiscardsLiveDebate(t *testing.T) {
+func TestAbortKeepsDebateResumable(t *testing.T) {
 	dir := t.TempDir()
+	cacheDir := filepath.Join(dir, "cache")
 	engine := blockingEngine{}
-	app := New(Options{ArchiveDir: dir}, engine)
+	app := New(Options{ArchiveDir: dir, CacheDir: cacheDir}, engine)
 	tm := teatest.NewTestModel(t, app, teatest.WithInitialTermSize(120, 40))
 
 	waitForText(t, tm, "Start a new debate")
@@ -138,6 +142,18 @@ func TestAbortDiscardsLiveDebate(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("expected no archived session after abort, got %d", len(entries))
+	}
+
+	// The aborting transcript is kept so the user can resume it later.
+	interrupted, err := cache.ListInterrupted(cacheDir)
+	if err != nil {
+		t.Fatalf("cache.ListInterrupted: %v", err)
+	}
+	if len(interrupted) != 1 {
+		t.Fatalf("expected the aborted debate to remain resumable in the cache, got %d", len(interrupted))
+	}
+	if _, ok := interrupted[0].Aborted["reason"]; !ok {
+		t.Errorf("expected the cache entry to record the abort reason, got %+v", interrupted[0].Aborted)
 	}
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})

@@ -29,20 +29,26 @@ type MenuModel struct {
 
 func NewMenuModel() MenuModel { return MenuModel{} }
 
-// items returns the menu's current entries; "Resume live debate" only
-// appears while a debate is running.
-func (m MenuModel) items(live bool) []string {
+// items returns the menu's current entries; "View live debate" only
+// appears while a debate is running, "Resume" only when interrupted debates exist.
+func (m MenuModel) items(live, hasResumable bool) []string {
 	items := []string{"Start a new debate", "Browse archive"}
 	if live {
-		items = append(items, "Resume live debate")
+		items = append(items, "View live debate")
+	}
+	if hasResumable {
+		items = append(items, "Resume")
 	}
 	return items
 }
 
 // Update handles a keypress. Screen transitions are requested via
 // SwitchScreenMsg commands; the root model owns the actual switch.
-func (m MenuModel) Update(msg tea.KeyMsg, live bool) (MenuModel, tea.Cmd) {
-	items := m.items(live)
+func (m MenuModel) Update(msg tea.KeyMsg, live, hasResumable bool) (MenuModel, tea.Cmd) {
+	items := m.items(live, hasResumable)
+	if m.cursor >= len(items) {
+		m.cursor = max(0, len(items)-1)
+	}
 	switch msg.String() {
 	case "up", "k":
 		if m.cursor > 0 {
@@ -58,22 +64,29 @@ func (m MenuModel) Update(msg tea.KeyMsg, live bool) (MenuModel, tea.Cmd) {
 			return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenForm} }
 		case "Browse archive":
 			return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenArchive} }
-		case "Resume live debate":
+		case "View live debate":
 			return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenSession} }
+		case "Resume":
+			return m, func() tea.Msg { return SwitchScreenMsg{Screen: ScreenResume} }
 		}
 	}
 	return m, nil
 }
 
-func (m MenuModel) View(live bool) string {
+func (m MenuModel) View(live, hasResumable bool) string {
+	items := m.items(live, hasResumable)
+	cursor := m.cursor
+	if cursor >= len(items) {
+		cursor = max(0, len(items)-1)
+	}
 	var b strings.Builder
 	b.WriteString("agon — two-agent debates\n\n")
-	for i, item := range m.items(live) {
-		cursor := "  "
-		if i == m.cursor {
-			cursor = "> "
+	for i, item := range items {
+		mark := "  "
+		if i == cursor {
+			mark = "> "
 		}
-		fmt.Fprintf(&b, "%s%s\n", cursor, item)
+		fmt.Fprintf(&b, "%s%s\n", mark, item)
 	}
 	b.WriteString("\n↑/↓ select · enter confirm · ctrl+c quit\n")
 	return b.String()

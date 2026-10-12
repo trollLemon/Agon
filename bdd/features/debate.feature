@@ -25,7 +25,7 @@ Feature: Two-agent debates
     Then I should see "Demo debate"
     And the session is read-only
 
-  Scenario: Aborting a live debate discards it
+  Scenario: Aborting a live debate keeps it resumable
     Given the app is open with a model that never responds
     When I open the new debate form
     And I fill in the topic "Should we ship it"

@@ -17,6 +17,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/trollLemon/agon/internal/types"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -27,7 +28,7 @@ import (
 // ArchiveListModel is a cursor-based browser over archived sessions.
 type ArchiveListModel struct {
 	dir    string
-	items  []archive.Session
+	items  []*types.Session
 	cursor int
 	err    error
 }
@@ -48,7 +49,7 @@ func (m ArchiveListModel) Reload() tea.Cmd {
 	}
 }
 
-func (m *ArchiveListModel) SetItems(items []archive.Session) {
+func (m *ArchiveListModel) SetItems(items []*types.Session) {
 	m.items = items
 	if m.cursor >= len(items) {
 		m.cursor = max(0, len(items)-1)

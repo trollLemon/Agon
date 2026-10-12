@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/trollLemon/agon/internal/types"
 	"io"
 	"testing"
 	"time"
@@ -141,21 +142,21 @@ func (w *world) anArchivedDebateTitledExists(title string) error {
 	if w.archiveDir == "" {
 		w.archiveDir = w.t.TempDir()
 	}
-	sess := archive.Session{
+	sess := types.Session{
 		SessionID: "demo-20260101-000000",
 		Title:     title,
 		Topic:     title,
 		Mode:      "proposition",
 		Tone:      "formal",
 		Rounds:    1,
-		Sides: []archive.Side{
+		Sides: []types.Side{
 			{ID: "advocate", Label: "Advocate", Stance: "for"},
 			{ID: "critic", Label: "Critic", Stance: "against"},
 		},
-		Messages: []archive.Message{{Role: "advocate", Round: 1, Content: "Ship it."}},
+		Messages: []types.Message{{Role: "advocate", Round: 1, Content: "Ship it."}},
 		Verdict:  "Adopt.",
 	}
-	return archive.Write(w.archiveDir, sess)
+	return archive.Write(w.archiveDir, &sess)
 }
 
 func (w *world) iOpenTheNewDebateForm() {
