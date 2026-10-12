@@ -60,6 +60,12 @@ type App struct {
 
 	currentContent strings.Builder
 	currentTools   []types.ToolCall
+	currentPrompts []cache.PromptEntry // prompts for current turn, for cache persistence
+
+	// pendingCacheSessionID holds the sessionID of a debate that has been
+	// cached but not yet started (waiting for bootstrap). Cleared on success
+	// or used for cleanup on bootstrap failure.
+	pendingCacheSessionID string
 
 	menu        tui.MenuModel
 	form        tui.FormModel
@@ -275,6 +281,8 @@ func (a *App) handleStartDebate(msg tui.StartDebateMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
+	a.pendingCacheSessionID = cfg.SessionID
+
 	view := tui.SessionViewFromSession(cfg.Session(), true)
 
 	if !a.initialized {
@@ -320,10 +328,17 @@ func (a *App) bootstrapCmd(modelSource string, bl *tui.BootLog) tea.Cmd {
 
 func (a *App) handleBootstrapDone(msg tui.BootstrapDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.Err != nil {
+		// Bootstrap failed (e.g., invalid model ID). Clean up the cache entry
+		// so it doesn't appear as a resumable debate.
+		if a.pendingCacheSessionID != "" {
+			_ = cache.Remove(a.cacheDir, a.pendingCacheSessionID)
+			a.pendingCacheSessionID = ""
+		}
 		a.bootScreen.SetError(msg.Err)
 		return a, nil
 	}
 	a.initialized = true
+	a.pendingCacheSessionID = "" // success, no cleanup needed
 	cur := a.curDebate
 	hasPending := cur != nil && a.view.Live && !a.view.Done
 	if hasPending {
@@ -375,21 +390,43 @@ func (a *App) handleDebateProgress(msg tui.DebateProgressMsg) (tea.Model, tea.Cm
 	return a, a.waitForProgress()
 }
 
-// persistCache snapshots the live view into the cache; it is the sole cache writer.
+// persistCache appends the latest message and prompt to the cache logs.
+// This is the sole cache writer for in-progress debates.
 func (a *App) persistCache() error {
 	if a.curDebate == nil {
 		return nil
 	}
 	cfg := a.curDebate.Config()
-	sess := cfg.Session()
-	sess.Messages = append([]types.Message(nil), a.view.Messages...)
-	sess.Verdict = a.view.Verdict
-	if a.view.Err != nil {
-		if _, ok := a.view.Err.(*orchestrator.AbortedError); ok {
-			sess.Aborted = map[string]string{"reason": a.view.Err.Error()}
+
+	if len(a.view.Messages) > 0 {
+		lastMsg := a.view.Messages[len(a.view.Messages)-1]
+		if err := cache.AppendMessage(a.cacheDir, cfg.SessionID, lastMsg); err != nil {
+			return fmt.Errorf("append message: %w", err)
 		}
 	}
-	return cache.UpdateCache(a.cacheDir, cfg.SessionID, sess)
+
+	if len(a.currentPrompts) > 0 {
+		lastPrompt := a.currentPrompts[len(a.currentPrompts)-1]
+		if err := cache.AppendPrompt(a.cacheDir, cfg.SessionID, lastPrompt); err != nil {
+			return fmt.Errorf("append prompt: %w", err)
+		}
+	}
+
+	meta, err := cache.LoadMeta(a.cacheDir, cfg.SessionID)
+	if err != nil {
+		return fmt.Errorf("load meta: %w", err)
+	}
+	meta.Verdict = a.view.Verdict
+	if a.view.Err != nil {
+		if _, ok := a.view.Err.(*orchestrator.AbortedError); ok {
+			meta.Aborted = map[string]string{"reason": a.view.Err.Error()}
+		}
+	}
+	if err := cache.UpdateMeta(a.cacheDir, cfg.SessionID, meta); err != nil {
+		return fmt.Errorf("update meta: %w", err)
+	}
+
+	return nil
 }
 
 func (a *App) openArchived(sessionID string) (tea.Model, tea.Cmd) {
@@ -413,12 +450,15 @@ func (a *App) loadCacheIntoSession(sessionID string) (tea.Model, tea.Cmd) {
 	if a.isLive() {
 		return a, nil
 	}
-	sess, err := cache.Load(a.cacheDir, sessionID)
+	sess, prompts, err := cache.LoadWithPrompts(a.cacheDir, sessionID)
 	if err != nil {
 		return a, nil
 	}
 	interrupted, _ := cache.WasInterrupted(a.cacheDir, sessionID)
 	if !interrupted {
+		return a, nil
+	}
+	if sess.Verdict != "" {
 		return a, nil
 	}
 
@@ -432,7 +472,7 @@ func (a *App) loadCacheIntoSession(sessionID string) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	d := orchestrator.NewResumed(sess, a.engine, sandbox)
+	d := orchestrator.NewResumed(sess, a.engine, sandbox, prompts)
 	view := tui.SessionViewFromSession(sess, true)
 
 	if !a.initialized {
@@ -443,6 +483,7 @@ func (a *App) loadCacheIntoSession(sessionID string) (tea.Model, tea.Cmd) {
 	a.curDebate = d
 	a.currentContent.Reset()
 	a.currentTools = nil
+	a.currentPrompts = nil // reset for new debate
 	a.screen = tui.ScreenSession
 	a.refreshSession()
 	a.runDebate(d)
@@ -465,6 +506,15 @@ func (a *App) accumulateEvent(ev orchestrator.Event) {
 		a.currentTools = nil
 		a.view.CurrentContent = ""
 		a.view.CurrentTools = nil
+		// Store prompt for cache persistence
+		if ev.Prompt != "" {
+			a.currentPrompts = append(a.currentPrompts, cache.PromptEntry{
+				Role:   ev.Role,
+				Round:  ev.Round,
+				Prompt: ev.Prompt,
+				IsLead: ev.Role != string(orchestrator.RoleJudge), // judge is not a lead/follower
+			})
+		}
 	case orchestrator.EventToken:
 		a.currentContent.WriteString(ev.Text)
 		a.view.CurrentContent = a.currentContent.String()
@@ -515,7 +565,6 @@ func (a *App) runDebate(d *orchestrator.Debate) {
 		if err != nil {
 			return
 		}
-		// The runner owns final state: archive from memory, then drop the cache entry.
 		if err := archive.Write(a.archiveDir, sess); err != nil {
 			a.progressCh <- orchestrator.Event{Kind: orchestrator.EventError, Text: fmt.Sprintf("archive write: %v", err)}
 			return
@@ -527,13 +576,12 @@ func (a *App) runDebate(d *orchestrator.Debate) {
 }
 
 func (a *App) waitForProgress() tea.Cmd {
-	sid := a.view.SessionID
 	return func() tea.Msg {
 		ev, ok := <-a.progressCh
 		if !ok {
 			return nil
 		}
-		return tui.DebateProgressMsg{SessionID: sid, Event: ev}
+		return tui.DebateProgressMsg{SessionID: a.view.SessionID, Event: ev}
 	}
 }
 

@@ -335,7 +335,7 @@ func TestNewResumedAllRoundsDoneWithVerdictReturnsImmediately(t *testing.T) {
 	sess := resumedSession(2, msgs, "verdict: adopt")
 	client := newFakeClient(map[Role][]scriptStep{})
 
-	d := NewResumed(sess, client, nil)
+	d := NewResumed(sess, client, nil, nil)
 	got, err := d.Run(context.Background())
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -363,7 +363,7 @@ func TestNewResumedRoundOneLeadOnlyRegeneratesFollower(t *testing.T) {
 		RoleJudge:  {{content: "verdict: adopt"}},
 	})
 
-	d := NewResumed(sess, client, nil)
+	d := NewResumed(sess, client, nil, nil)
 	got, err := d.Run(context.Background())
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -404,7 +404,7 @@ func TestNewResumedCompleteRoundOneRunsFullRoundTwo(t *testing.T) {
 		RoleJudge:  {{content: "verdict: adopt"}},
 	})
 
-	d := NewResumed(sess, client, nil)
+	d := NewResumed(sess, client, nil, nil)
 	got, err := d.Run(context.Background())
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -436,7 +436,7 @@ func TestNewResumedAllRoundsDoneWithoutVerdictRunsJudgeOnly(t *testing.T) {
 		RoleJudge: {{content: "verdict: adopt"}},
 	})
 
-	d := NewResumed(sess, client, nil)
+	d := NewResumed(sess, client, nil, nil)
 	got, err := d.Run(context.Background())
 	if err != nil {
 		t.Fatalf("Run: %v", err)

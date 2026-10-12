@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/trollLemon/agon/internal/cache"
 	"github.com/trollLemon/agon/internal/prompts"
 	"github.com/trollLemon/agon/internal/tools"
 	"github.com/trollLemon/agon/internal/types"
@@ -65,7 +66,8 @@ type Debate struct {
 	aborted string
 	cancel  context.CancelFunc
 
-	initial *types.Session
+	initial       *types.Session
+	resumePrompts []cache.PromptEntry
 }
 
 // New creates a Debate. If cfg.SandboxDirs or cfg.SandboxFiles is set, sandbox
@@ -109,15 +111,18 @@ func ConfigFromSession(sess *types.Session) Config {
 
 // NewResumed creates a Debate that will resume from sess, continuing from
 // the first incomplete round. The caller is responsible for recreating the
-// sandbox from sess.Dirs/sess.Files if needed.
-func NewResumed(sess *types.Session, client ChatClient, sandbox *tools.Sandbox) *Debate {
+// sandbox from sess.Dirs/sess.Files if needed. prompts are the cached
+// prompt log entries for reconstructing conversation histories without
+// regenerating prompts.
+func NewResumed(sess *types.Session, client ChatClient, sandbox *tools.Sandbox, prompts []cache.PromptEntry) *Debate {
 	cfg := ConfigFromSession(sess)
 	return &Debate{
-		cfg:     cfg,
-		client:  client,
-		sandbox: sandbox,
-		events:  make(chan Event, 512),
-		initial: sess,
+		cfg:           cfg,
+		client:        client,
+		sandbox:       sandbox,
+		events:        make(chan Event, 512),
+		initial:       sess,
+		resumePrompts: prompts,
 	}
 }
 
@@ -188,10 +193,15 @@ func (d *Debate) Run(parent context.Context) (*types.Session, error) {
 	defer cancel()
 	defer close(d.events)
 
-	plan, lead, follow := prepareSession(d.cfg, d.initial, d.sandbox)
+	plan, lead, follow, regeneratedPrompts := prepareSession(d, d.cfg, d.initial, d.sandbox)
 	if plan.Done {
 		d.emit(Event{Kind: EventVerdict, Text: plan.Session.Verdict})
 		return plan.Session, nil
+	}
+
+	// If we regenerated prompts (fresh debate or cache miss), store them for cache persistence
+	if regeneratedPrompts != nil {
+		d.resumePrompts = regeneratedPrompts
 	}
 
 	if err := d.executeRounds(ctx, lead, follow, plan.Session, plan.StartRound, plan.LastFollower); err != nil {
@@ -200,10 +210,48 @@ func (d *Debate) Run(parent context.Context) (*types.Session, error) {
 	return d.completeWithVerdict(ctx, plan.Session)
 }
 
-func prepareSession(cfg Config, initial *types.Session, sandbox *tools.Sandbox) (resumePlan, *sideRuntime, *sideRuntime) {
+// regeneratePrompts rebuilds histories from scratch and returns the prompt entries
+// so they can be cached for future resumes.
+func regeneratePrompts(cfg Config, initial *types.Session, lead, follow *sideRuntime) []cache.PromptEntry {
+	var out []cache.PromptEntry
+	var lastFollower string
+	for round := 1; round <= cfg.Rounds; round++ {
+		leadIdx := (round - 1) * 2
+		followIdx := leadIdx + 1
+		if leadIdx >= len(initial.Messages) {
+			break
+		}
+		leadMsg := prompts.OpeningMessage(cfg.Topic, cfg.StartingContext, round, cfg.Rounds)
+		if round > 1 {
+			leadMsg = prompts.PeerMessage(follow.label, lastFollower, round, cfg.Rounds)
+		}
+		lead.history = append(lead.history, ChatMessage{Role: RoleUser, Content: leadMsg})
+		out = append(out, cache.PromptEntry{Role: lead.roleName, Round: round, Prompt: leadMsg, IsLead: true})
+		mLead := initial.Messages[leadIdx]
+		lead.history = append(lead.history, ChatMessage{Role: RoleAssistant, Content: mLead.Content})
+		if followIdx >= len(initial.Messages) {
+			break
+		}
+		followMsg := prompts.PeerMessage(lead.label, mLead.Content, round, cfg.Rounds)
+		follow.history = append(follow.history, ChatMessage{Role: RoleUser, Content: followMsg})
+		out = append(out, cache.PromptEntry{Role: follow.roleName, Round: round, Prompt: followMsg, IsLead: false})
+		mFollow := initial.Messages[followIdx]
+		follow.history = append(follow.history, ChatMessage{Role: RoleAssistant, Content: mFollow.Content})
+		lastFollower = mFollow.Content
+	}
+	return out
+}
+
+func prepareSession(d *Debate, cfg Config, initial *types.Session, sandbox *tools.Sandbox) (resumePlan, *sideRuntime, *sideRuntime, []cache.PromptEntry) {
 	lead := newSideRuntime(cfg, sandbox, cfg.Sides[0], cfg.Sides[1], true)
 	follow := newSideRuntime(cfg, sandbox, cfg.Sides[1], cfg.Sides[0], false)
-	rebuildHistories(initial, lead, follow, cfg)
+
+	var cachedPrompts []cache.PromptEntry
+	if err := d.rebuildHistories(lead, follow); err != nil {
+		// No cached prompts - regenerate and return them for caching
+		cachedPrompts = regeneratePrompts(cfg, initial, lead, follow)
+	}
+
 	startRound := nextTurn(initial, cfg.Rounds)
 	return resumePlan{
 		// rounds+1 once every round is complete, so executeRounds skips to the judge.
@@ -211,7 +259,7 @@ func prepareSession(cfg Config, initial *types.Session, sandbox *tools.Sandbox) 
 		StartRound:   startRound,
 		LastFollower: lastFollowerFromSess(initial, cfg.Rounds),
 		Done:         startRound > cfg.Rounds && initial.Verdict != "",
-	}, lead, follow
+	}, lead, follow, cachedPrompts
 }
 
 func (d *Debate) executeRounds(ctx context.Context, lead, follow *sideRuntime, sess *types.Session, startRound int, lastFollower string) error {
@@ -236,7 +284,7 @@ func (d *Debate) executeRounds(ctx context.Context, lead, follow *sideRuntime, s
 		}
 		content := sess.Messages[leadIdx].Content
 		followMsg := prompts.PeerMessage(lead.label, content, round, d.cfg.Rounds)
-		followContent, err := d.runTurn(ctx, follow, round, sess, followMsg)
+		followContent, err := d.runTurn(ctx, follow, round, sess, followMsg, false)
 		if err != nil {
 			return err
 		}
@@ -250,12 +298,12 @@ func (d *Debate) runFullRound(ctx context.Context, lead, follow *sideRuntime, se
 	if round > 1 {
 		leadMsg = prompts.PeerMessage(follow.label, lastFollower, round, d.cfg.Rounds)
 	}
-	content, err := d.runTurn(ctx, lead, round, sess, leadMsg)
+	content, err := d.runTurn(ctx, lead, round, sess, leadMsg, true)
 	if err != nil {
 		return err
 	}
 	followMsg := prompts.PeerMessage(lead.label, content, round, d.cfg.Rounds)
-	_, err = d.runTurn(ctx, follow, round, sess, followMsg)
+	_, err = d.runTurn(ctx, follow, round, sess, followMsg, false)
 	return err
 }
 
@@ -297,29 +345,40 @@ func lastFollowerFromSess(sess *types.Session, rounds int) string {
 	return last
 }
 
-func rebuildHistories(sess *types.Session, lead, follow *sideRuntime, cfg Config) {
-	var lastFollower string
-	for round := 1; round <= cfg.Rounds; round++ {
-		leadIdx := (round - 1) * 2
-		followIdx := leadIdx + 1
-		if leadIdx >= len(sess.Messages) {
-			break
+// rebuildHistories reconstructs the conversation histories for both sides.
+// It requires cached prompts (from a previous run). If no cached prompts exist,
+// it returns an error and the caller must regenerate prompts.
+func (d *Debate) rebuildHistories(lead, follow *sideRuntime) error {
+	if len(d.resumePrompts) == 0 {
+		return fmt.Errorf("no cached prompts available for resume; caller must regenerate")
+	}
+	d.rebuildHistoriesFromPrompts(lead, follow)
+	return nil
+}
+
+func (d *Debate) rebuildHistoriesFromPrompts(lead, follow *sideRuntime) {
+	// Prompts are in order: lead round 1, follow round 1, lead round 2, follow round 2, ...
+	// We iterate through messages and match with prompts.
+	msgIdx := 0
+	for _, p := range d.resumePrompts {
+		if p.Role == lead.roleName {
+			// Lead's turn
+			lead.history = append(lead.history, ChatMessage{Role: RoleUser, Content: p.Prompt})
+			if msgIdx < len(d.initial.Messages) {
+				mLead := d.initial.Messages[msgIdx]
+				lead.history = append(lead.history, ChatMessage{Role: RoleAssistant, Content: mLead.Content})
+				msgIdx++
+			}
+		} else if p.Role == follow.roleName {
+			// Follower's turn
+			follow.history = append(follow.history, ChatMessage{Role: RoleUser, Content: p.Prompt})
+			if msgIdx < len(d.initial.Messages) {
+				mFollow := d.initial.Messages[msgIdx]
+				follow.history = append(follow.history, ChatMessage{Role: RoleAssistant, Content: mFollow.Content})
+				msgIdx++
+			}
 		}
-		leadMsg := prompts.OpeningMessage(cfg.Topic, cfg.StartingContext, round, cfg.Rounds)
-		if round > 1 {
-			leadMsg = prompts.PeerMessage(follow.label, lastFollower, round, cfg.Rounds)
-		}
-		lead.history = append(lead.history, ChatMessage{Role: RoleUser, Content: leadMsg})
-		mLead := sess.Messages[leadIdx]
-		lead.history = append(lead.history, ChatMessage{Role: RoleAssistant, Content: mLead.Content})
-		if followIdx >= len(sess.Messages) {
-			break
-		}
-		followMsg := prompts.PeerMessage(lead.label, mLead.Content, round, cfg.Rounds)
-		follow.history = append(follow.history, ChatMessage{Role: RoleUser, Content: followMsg})
-		mFollow := sess.Messages[followIdx]
-		follow.history = append(follow.history, ChatMessage{Role: RoleAssistant, Content: mFollow.Content})
-		lastFollower = mFollow.Content
+		// Note: judge prompts are not used for history reconstruction
 	}
 }
 
@@ -362,9 +421,9 @@ func newSideRuntime(cfg Config, sandbox *tools.Sandbox, side, opponent types.Sid
 // runTurn appends userContent to s's history, drives the model (including
 // any tool-call sub-loop), records the resulting message onto sess, and
 // returns the assistant's final text.
-func (d *Debate) runTurn(ctx context.Context, s *sideRuntime, round int, sess *types.Session, userContent string) (string, error) {
+func (d *Debate) runTurn(ctx context.Context, s *sideRuntime, round int, sess *types.Session, userContent string, isLead bool) (string, error) {
 	s.history = append(s.history, ChatMessage{Role: RoleUser, Content: userContent})
-	d.emit(Event{Kind: EventTurnStart, Role: s.roleName, Round: round})
+	d.emit(Event{Kind: EventTurnStart, Role: s.roleName, Round: round, Prompt: userContent})
 
 	var toolCallLog []types.ToolCall
 	var toolSpecs []tools.Spec
@@ -436,11 +495,12 @@ func (d *Debate) runJudgeTurn(ctx context.Context, sess *types.Session) (string,
 	if err := d.checkAbort(ctx); err != nil {
 		return "", err
 	}
-	d.emit(Event{Kind: EventTurnStart, Role: string(RoleJudge)})
+	judgePrompt := prompts.JudgeUserMessage(d.cfg.Topic, renderTranscript(sess))
+	d.emit(Event{Kind: EventTurnStart, Role: string(RoleJudge), Prompt: judgePrompt})
 
 	history := []ChatMessage{
 		{Role: RoleSystem, Content: prompts.JudgeSystem(d.cfg.Mode)},
-		{Role: RoleUser, Content: prompts.JudgeUserMessage(d.cfg.Topic, renderTranscript(sess))},
+		{Role: RoleUser, Content: judgePrompt},
 	}
 	ch, err := d.client.ChatStreaming(ctx, RoleJudge, history, nil)
 	if err != nil {

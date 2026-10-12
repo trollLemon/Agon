@@ -143,9 +143,10 @@ const (
 // render: a token chunk, a completed tool call, a turn boundary, the
 // verdict, or a terminal abort/error.
 type Event struct {
-	Kind  EventKind
-	Role  string
-	Round int
-	Text  string
-	Tool  *types.ToolCall
+	Kind   EventKind
+	Role   string
+	Round  int
+	Text   string
+	Tool   *types.ToolCall
+	Prompt string // for EventTurnStart: the prompt sent to the model
 }
